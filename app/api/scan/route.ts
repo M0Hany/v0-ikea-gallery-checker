@@ -116,54 +116,58 @@ async function detectBrokenGalleries(url: string): Promise<BrokenGallery[]> {
 
     const brokenItems: BrokenGallery[] = []
 
-    // Pattern 1: Look for the specific IKEA curated gallery pattern
-    // Check for shoppable-image divs with empty product data
-    const shoppableImageRegex = /<div[^>]*class="[^"]*pub__shoppable-image[^"]*"[^>]*>[\s\S]*?<\/div>/g
-    let match
+    // Pattern 1: Look for the container div with class c1s88gxp a1wqrctr
+    const containerRegex = /<div[^>]*class="[^"]*c1s88gxp[^"]*a1wqrctr[^"]*"[^>]*>([\s\S]*?)<\/div>/g
+    let containerMatch
 
-    while ((match = shoppableImageRegex.exec(html)) !== null) {
-      const galleryDiv = match[0]
-      const hasProductImages = /data-product-id|pub__product-image/.test(galleryDiv)
-      const hasImageSrc = /src="(?!.*\?f=[^"]*)"/.test(galleryDiv)
+    while ((containerMatch = containerRegex.exec(html)) !== null) {
+      const containerDiv = containerMatch[0]
+      const containerContent = containerMatch[1]
 
-      // If shoppable-image div exists but has no product images, it's broken
-      if (!hasProductImages || !hasImageSrc) {
+      // Check if inside the container there's a pub__shoppable-image with --visible-dots (WORKING)
+      const hasWorkingGallery = /pub__shoppable-image[^"]*--visible-dots/.test(containerContent)
+
+      if (hasWorkingGallery) {
+        // Gallery is working - has the visible-dots indicator
         brokenItems.push({
           page_url: url,
-          image_url: galleryDiv.substring(0, 500),
-          alt_text: "Empty shoppable gallery",
-          reason: "Shoppable gallery component has no product images",
-          status: "broken",
-          scraped_html: html, // removed 50KB limit to capture full DOM
+          image_url: containerDiv.substring(0, 500),
+          alt_text: "Curated gallery with visible dots",
+          reason: "Shoppable gallery is working properly",
+          status: "working",
+          scraped_html: html,
           puppeteer_used: puppeteerUsed,
           debug_info: debugInfo,
         })
-      }
-    }
+      } else {
+        // Check if it just has img tag without shoppable-image (BROKEN)
+        const hasShoppableImage = /pub__shoppable-image/.test(containerContent)
 
-    // Pattern 2: Check for valid image tags in galleries
-    const imageRegex = /<img[^>]+src="([^"]+)"[^>]*alt="([^"]*)"/g
-    while ((match = imageRegex.exec(html)) !== null) {
-      const imageUrl = match[1]
-      const altText = match[2]
-
-      if (
-        imageUrl.includes("broken") ||
-        imageUrl.includes("null") ||
-        imageUrl.includes("undefined") ||
-        imageUrl.includes("error") ||
-        !imageUrl.startsWith("http")
-      ) {
-        brokenItems.push({
-          page_url: url,
-          image_url: imageUrl,
-          alt_text: altText,
-          reason: "Invalid or broken image URL",
-          status: "broken",
-          scraped_html: html, // removed 50KB limit to capture full DOM
-          puppeteer_used: puppeteerUsed,
-          debug_info: debugInfo,
-        })
+        if (!hasShoppableImage) {
+          // Only has img tag, not a proper shoppable gallery (BROKEN)
+          brokenItems.push({
+            page_url: url,
+            image_url: containerDiv.substring(0, 500),
+            alt_text: "Broken curated gallery",
+            reason: "Container has image but missing pub__shoppable-image component",
+            status: "broken",
+            scraped_html: html,
+            puppeteer_used: puppeteerUsed,
+            debug_info: debugInfo,
+          })
+        } else if (!hasWorkingGallery) {
+          // Has shoppable-image but missing --visible-dots (BROKEN)
+          brokenItems.push({
+            page_url: url,
+            image_url: containerDiv.substring(0, 500),
+            alt_text: "Gallery without visible dots",
+            reason: "Shoppable gallery missing --visible-dots class",
+            status: "broken",
+            scraped_html: html,
+            puppeteer_used: puppeteerUsed,
+            debug_info: debugInfo,
+          })
+        }
       }
     }
 
@@ -173,19 +177,16 @@ async function detectBrokenGalleries(url: string): Promise<BrokenGallery[]> {
           page_url: url,
           image_url: "",
           alt_text: "",
-          reason: "Page scanned successfully",
+          reason: "No curated galleries found on page",
           status: "working",
-          scraped_html: html, // removed 50KB limit to capture full DOM
+          scraped_html: html,
           puppeteer_used: puppeteerUsed,
           debug_info: debugInfo,
         },
       ]
     }
 
-    return brokenItems.map((item) => ({
-      ...item,
-      scraped_html: html, // removed 50KB limit to capture full DOM
-    }))
+    return brokenItems
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Unknown error"
     return [
