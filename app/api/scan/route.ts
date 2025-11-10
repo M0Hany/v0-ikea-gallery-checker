@@ -61,7 +61,7 @@ async function detectBrokenGalleries(url: string): Promise<BrokenGallery[]> {
         })
 
       // Extra wait for any dynamic content
-      await page.waitForTimeout(5000) // Extended dynamic content wait to 5 seconds
+      await new Promise((resolve) => setTimeout(resolve, 5000)) // Extended dynamic content wait to 5 seconds
 
       html = await page.content()
       puppeteerUsed = true
