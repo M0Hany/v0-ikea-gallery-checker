@@ -5,7 +5,7 @@ services:
     region: oregon
     plan: starter
 
-    buildCommand: pnpm install --frozen-lockfile && npx puppeteer browsers install chrome && pnpm run build
+    buildCommand: pnpm install --frozen-lockfile && pnpm run build
     startCommand: pnpm start
 
     nixpacks:
