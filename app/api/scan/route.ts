@@ -65,6 +65,16 @@ async function detectBrokenGalleries(url: string): Promise<BrokenGallery[]> {
       debugInfo += " | Final DOM captured"
 
       await browser.close()
+
+      const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i)
+      if (bodyMatch) {
+        html = bodyMatch[1]
+        // Remove script and style tags
+        html = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
+        html = html.replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, "")
+        // Remove inline event handlers and data attributes we don't need
+        html = html.replace(/\s+(on\w+|data-[a-z-]*)\s*=\s*"[^"]*"/gi, "")
+      }
     } catch (puppeteerError) {
       debugInfo += ` | Puppeteer failed: ${puppeteerError instanceof Error ? puppeteerError.message : "Unknown error"}`
 
@@ -124,7 +134,7 @@ async function detectBrokenGalleries(url: string): Promise<BrokenGallery[]> {
           alt_text: "Empty shoppable gallery",
           reason: "Shoppable gallery component has no product images",
           status: "broken",
-          scraped_html: html.substring(0, 50000), // Full DOM after JavaScript execution
+          scraped_html: html, // removed 50KB limit to capture full DOM
           puppeteer_used: puppeteerUsed,
           debug_info: debugInfo,
         })
@@ -150,7 +160,7 @@ async function detectBrokenGalleries(url: string): Promise<BrokenGallery[]> {
           alt_text: altText,
           reason: "Invalid or broken image URL",
           status: "broken",
-          scraped_html: html.substring(0, 50000),
+          scraped_html: html, // removed 50KB limit to capture full DOM
           puppeteer_used: puppeteerUsed,
           debug_info: debugInfo,
         })
@@ -165,14 +175,17 @@ async function detectBrokenGalleries(url: string): Promise<BrokenGallery[]> {
           alt_text: "",
           reason: "Page scanned successfully",
           status: "working",
-          scraped_html: html.substring(0, 50000),
+          scraped_html: html, // removed 50KB limit to capture full DOM
           puppeteer_used: puppeteerUsed,
           debug_info: debugInfo,
         },
       ]
     }
 
-    return brokenItems
+    return brokenItems.map((item) => ({
+      ...item,
+      scraped_html: html, // removed 50KB limit to capture full DOM
+    }))
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Unknown error"
     return [
