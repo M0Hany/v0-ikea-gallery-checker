@@ -34,10 +34,9 @@ async function detectBrokenGalleries(url: string): Promise<BrokenGallery[]> {
         args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
       }
 
-      // Use explicitly set executable path if available
       if (process.env.PUPPETEER_EXECUTABLE_PATH) {
         launchOptions.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH
-        debugInfo += " | Using configured Chrome executable"
+        debugInfo += " | Using system Chromium"
       }
 
       const browser = await puppeteer.default.launch(launchOptions)
