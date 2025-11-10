@@ -3,12 +3,11 @@ FROM node:22-alpine
 # Install system dependencies including Chromium
 RUN apk add --no-cache \
     chromium \
-    noto-noto-sans \
+    noto-sans \
     freetype \
     harfbuzz \
     ca-certificates \
-    ttf-dejavu \
-    libxss1
+    ttf-dejavu
 
 # Set environment for Puppeteer to use system chromium
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
