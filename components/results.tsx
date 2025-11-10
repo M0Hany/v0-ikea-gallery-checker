@@ -1,16 +1,17 @@
 "use client"
 import { useState } from "react"
-import { AlertCircle, CheckCircle2 } from "lucide-react"
+import { AlertCircle, CheckCircle2, AlertTriangle } from "lucide-react"
 
 interface BrokenGallery {
   page_url: string
   image_url: string
   alt_text: string
   reason: string
-  status: "broken" | "working"
+  status: "broken" | "working" | "no curated gallery"
   scraped_html: string
   puppeteer_used: boolean
   debug_info: string
+  cloudflare_blocked: boolean
 }
 
 interface ResultsProps {
@@ -41,6 +42,26 @@ export function Results({ items }: ResultsProps) {
 
   const uniqueUrlItems = Array.from(new Map(items.map((item) => [item.page_url, item])).values())
 
+  const getStatusIcon = (status: string) => {
+    if (status === "broken") {
+      return <AlertCircle className="w-4 h-4 text-red-600 dark:text-red-400" />
+    } else if (status === "no curated gallery") {
+      return <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+    } else {
+      return <CheckCircle2 className="w-4 h-4 text-green-600 dark:text-green-400" />
+    }
+  }
+
+  const getStatusText = (status: string) => {
+    if (status === "broken") {
+      return <span className="text-xs font-semibold text-red-600 dark:text-red-400">BROKEN</span>
+    } else if (status === "no curated gallery") {
+      return <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">NO GALLERY</span>
+    } else {
+      return <span className="text-xs font-semibold text-green-600 dark:text-green-400">WORKING</span>
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-lg">
@@ -55,7 +76,8 @@ export function Results({ items }: ResultsProps) {
             {uniqueUrlItems.map((item, idx) => (
               <tr
                 key={idx}
-                className="border-b border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900/50"
+                className="border-b border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900/50 cursor-pointer"
+                onClick={() => toggleExpanded(item.page_url)}
               >
                 <td className="px-4 py-3">
                   <a
@@ -63,22 +85,19 @@ export function Results({ items }: ResultsProps) {
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-blue-600 dark:text-blue-400 hover:underline break-all text-xs"
+                    onClick={(e) => e.stopPropagation()}
                   >
                     {item.page_url}
                   </a>
                 </td>
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-2 w-fit">
-                    {item.status === "broken" ? (
-                      <>
-                        <AlertCircle className="w-4 h-4 text-red-600 dark:text-red-400" />
-                        <span className="text-xs font-semibold text-red-600 dark:text-red-400">BROKEN</span>
-                      </>
-                    ) : (
-                      <>
-                        <CheckCircle2 className="w-4 h-4 text-green-600 dark:text-green-400" />
-                        <span className="text-xs font-semibold text-green-600 dark:text-green-400">WORKING</span>
-                      </>
+                    {getStatusIcon(item.status)}
+                    {getStatusText(item.status)}
+                    {item.cloudflare_blocked && (
+                      <span className="text-xs bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 px-2 py-1 rounded ml-2">
+                        CF Blocked
+                      </span>
                     )}
                   </div>
                 </td>

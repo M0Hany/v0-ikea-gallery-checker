@@ -6,17 +6,41 @@ interface BrokenGallery {
   image_url: string
   alt_text: string
   reason: string
-  status: "broken" | "working"
+  status: "broken" | "working" | "no curated gallery"
   scraped_html: string
   puppeteer_used: boolean
   debug_info: string
+  cloudflare_blocked: boolean
 }
 
 interface ScanResult {
   total_pages: number
   broken_count: number
   working_count: number
+  no_gallery_count: number
+  cloudflare_blocked_count: number
   items: BrokenGallery[]
+}
+
+function detectCloudflareBlocking(status: number, headers: Headers, html: string): boolean {
+  // Check for Cloudflare status codes
+  if (status === 403 || status === 429 || status === 503) {
+    return true
+  }
+  // Check for Cloudflare-specific headers
+  if (headers.get("server")?.includes("cloudflare") || headers.get("cf-ray")) {
+    return true
+  }
+  // Check for Cloudflare challenge page content
+  if (
+    html.includes("You are being rate limited") ||
+    html.includes("Checking your browser") ||
+    html.includes("cloudflare-challenge") ||
+    html.includes("Ray ID:")
+  ) {
+    return true
+  }
+  return false
 }
 
 async function detectBrokenGalleries(url: string): Promise<BrokenGallery[]> {
@@ -24,6 +48,7 @@ async function detectBrokenGalleries(url: string): Promise<BrokenGallery[]> {
     let html: string
     let puppeteerUsed = false
     let debugInfo = ""
+    let cloudflareBlocked = false
 
     try {
       const puppeteer = await import("puppeteer")
@@ -31,7 +56,14 @@ async function detectBrokenGalleries(url: string): Promise<BrokenGallery[]> {
 
       const launchOptions: any = {
         headless: true,
-        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+        args: [
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-dev-shm-usage",
+          "--disable-gpu",
+          "--disable-extensions",
+          "--disable-plugins",
+        ],
       }
 
       if (process.env.PUPPETEER_EXECUTABLE_PATH) {
@@ -44,21 +76,22 @@ async function detectBrokenGalleries(url: string): Promise<BrokenGallery[]> {
 
       const page = await browser.newPage()
 
-      // Wait for network idle and specific IKEA elements to load
-      await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 }) // Increased timeout to 60 seconds and changed waitUntil strategy
-      debugInfo += " | Page loaded"
-
-      // Wait for gallery elements or fallback after timeout
       try {
-        await page.waitForSelector('[class*="c1s88gxp"], [class*="pub__shoppable-image"], .product-item', {
-          timeout: 15000,
-        })
-        debugInfo += " | Gallery elements found"
-      } catch {
-        debugInfo += " | Gallery selectors not found, continuing anyway"
+        await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 })
+        debugInfo += " | Page loaded"
+      } catch (navError) {
+        debugInfo += ` | Navigation timeout after 30s`
+        cloudflareBlocked = true
       }
 
-      await new Promise((resolve) => setTimeout(resolve, 3000))
+      try {
+        await page.waitForSelector('[class*="c1s88gxp"]', { timeout: 5000 })
+        debugInfo += " | Gallery elements found"
+      } catch {
+        debugInfo += " | No gallery selectors found"
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 1000))
 
       html = await page.content()
       puppeteerUsed = true
@@ -69,27 +102,44 @@ async function detectBrokenGalleries(url: string): Promise<BrokenGallery[]> {
       const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i)
       if (bodyMatch) {
         html = bodyMatch[1]
-        // Remove script and style tags
         html = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
         html = html.replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, "")
-        // Remove inline event handlers and data attributes we don't need
         html = html.replace(/\s+(on\w+|data-[a-z-]*)\s*=\s*"[^"]*"/gi, "")
       }
     } catch (puppeteerError) {
       debugInfo += ` | Puppeteer failed: ${puppeteerError instanceof Error ? puppeteerError.message : "Unknown error"}`
 
       const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 15000)
+      const timeoutId = setTimeout(() => controller.abort(), 10000)
 
       try {
         const response = await fetch(url, {
           headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "User-Agent":
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
           },
           signal: controller.signal,
         })
 
         clearTimeout(timeoutId)
+
+        cloudflareBlocked = detectCloudflareBlocking(response.status, response.headers, await response.text())
+        if (cloudflareBlocked) {
+          debugInfo += " | Cloudflare blocking detected"
+          return [
+            {
+              page_url: url,
+              image_url: "N/A",
+              alt_text: "",
+              reason: "Cloudflare is blocking requests",
+              status: "broken",
+              scraped_html: "",
+              puppeteer_used: false,
+              debug_info: debugInfo,
+              cloudflare_blocked: true,
+            },
+          ]
+        }
 
         if (!response.ok) {
           return [
@@ -102,6 +152,7 @@ async function detectBrokenGalleries(url: string): Promise<BrokenGallery[]> {
               scraped_html: "",
               puppeteer_used: false,
               debug_info: debugInfo + ` | Fetch status: ${response.status}`,
+              cloudflare_blocked: false,
             },
           ]
         }
@@ -116,19 +167,33 @@ async function detectBrokenGalleries(url: string): Promise<BrokenGallery[]> {
 
     const brokenItems: BrokenGallery[] = []
 
-    // Pattern 1: Look for the container div with class c1s88gxp a1wqrctr
     const containerRegex = /<div[^>]*class="[^"]*c1s88gxp[^"]*a1wqrctr[^"]*"[^>]*>([\s\S]*?)<\/div>/g
-    let containerMatch
+    const containers = Array.from(html.matchAll(containerRegex))
 
+    if (containers.length === 0) {
+      return [
+        {
+          page_url: url,
+          image_url: "",
+          alt_text: "",
+          reason: "No curated gallery components found on this page",
+          status: "no curated gallery",
+          scraped_html: "",
+          puppeteer_used: puppeteerUsed,
+          debug_info: debugInfo,
+          cloudflare_blocked: false,
+        },
+      ]
+    }
+
+    let containerMatch
     while ((containerMatch = containerRegex.exec(html)) !== null) {
       const containerDiv = containerMatch[0]
       const containerContent = containerMatch[1]
 
-      // Check if inside the container there's a pub__shoppable-image with --visible-dots (WORKING)
       const hasWorkingGallery = /pub__shoppable-image[^"]*--visible-dots/.test(containerContent)
 
       if (hasWorkingGallery) {
-        // Gallery is working - has the visible-dots indicator
         brokenItems.push({
           page_url: url,
           image_url: containerDiv.substring(0, 500),
@@ -138,13 +203,12 @@ async function detectBrokenGalleries(url: string): Promise<BrokenGallery[]> {
           scraped_html: html,
           puppeteer_used: puppeteerUsed,
           debug_info: debugInfo,
+          cloudflare_blocked: false,
         })
       } else {
-        // Check if it just has img tag without shoppable-image (BROKEN)
         const hasShoppableImage = /pub__shoppable-image/.test(containerContent)
 
         if (!hasShoppableImage) {
-          // Only has img tag, not a proper shoppable gallery (BROKEN)
           brokenItems.push({
             page_url: url,
             image_url: containerDiv.substring(0, 500),
@@ -154,9 +218,9 @@ async function detectBrokenGalleries(url: string): Promise<BrokenGallery[]> {
             scraped_html: html,
             puppeteer_used: puppeteerUsed,
             debug_info: debugInfo,
+            cloudflare_blocked: false,
           })
         } else if (!hasWorkingGallery) {
-          // Has shoppable-image but missing --visible-dots (BROKEN)
           brokenItems.push({
             page_url: url,
             image_url: containerDiv.substring(0, 500),
@@ -166,24 +230,10 @@ async function detectBrokenGalleries(url: string): Promise<BrokenGallery[]> {
             scraped_html: html,
             puppeteer_used: puppeteerUsed,
             debug_info: debugInfo,
+            cloudflare_blocked: false,
           })
         }
       }
-    }
-
-    if (brokenItems.length === 0) {
-      return [
-        {
-          page_url: url,
-          image_url: "",
-          alt_text: "",
-          reason: "No curated galleries found on page",
-          status: "working",
-          scraped_html: html,
-          puppeteer_used: puppeteerUsed,
-          debug_info: debugInfo,
-        },
-      ]
     }
 
     return brokenItems
@@ -199,6 +249,7 @@ async function detectBrokenGalleries(url: string): Promise<BrokenGallery[]> {
         scraped_html: "",
         puppeteer_used: false,
         debug_info: `Fatal error: ${errorMessage}`,
+        cloudflare_blocked: false,
       },
     ]
   }
@@ -230,27 +281,31 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     for (const item of allItems) {
       if (!urlStatusMap.has(item.page_url)) {
-        // First time seeing this URL - store it
         urlStatusMap.set(item.page_url, item)
       } else {
         const existing = urlStatusMap.get(item.page_url)!
-        // If this item is broken, mark the URL as broken
         if (item.status === "broken") {
           existing.status = "broken"
-          // Keep the most recent/relevant debug info
+          existing.cloudflare_blocked = item.cloudflare_blocked || existing.cloudflare_blocked
           existing.debug_info = item.debug_info
+        } else if (item.status === "no curated gallery" && existing.status === "working") {
+          existing.status = "no curated gallery"
         }
       }
     }
 
     const uniqueItems = Array.from(urlStatusMap.values())
     const brokenCount = uniqueItems.filter((item) => item.status === "broken").length
-    const workingCount = uniqueItems.length - brokenCount
+    const workingCount = uniqueItems.filter((item) => item.status === "working").length
+    const noCuratedGalleryCount = uniqueItems.filter((item) => item.status === "no curated gallery").length
+    const cloudflareBlockedCount = uniqueItems.filter((item) => item.cloudflare_blocked).length
 
     const result: ScanResult = {
       total_pages: totalScanned,
       broken_count: brokenCount,
       working_count: workingCount,
+      no_gallery_count: noCuratedGalleryCount,
+      cloudflare_blocked_count: cloudflareBlockedCount,
       items: uniqueItems,
     }
 
