@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: ikea-gallery-checker
+    env: node
+    region: oregon
+    plan: starter
+    
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    
+    nixpacks:
+      packages:
+        - ca-certificates
+        - fontconfig
+        - freetype
+        - libx11
+        - libxcb
+        - libxext
+        - libxrender
+        - libnss3
+        - libgconf-2-4
+        - libappindicator3-1
+        - libpangocairo-1.0
+      
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_OPTIONS
+        value: --max-old-space-size=1024
