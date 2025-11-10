@@ -3,7 +3,6 @@ FROM node:22-alpine
 # Install system dependencies including Chromium
 RUN apk add --no-cache \
     chromium \
-    noto-sans \
     freetype \
     harfbuzz \
     ca-certificates \
