@@ -48,20 +48,17 @@ async function detectBrokenGalleries(url: string): Promise<BrokenGallery[]> {
       await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 }) // Increased timeout to 60 seconds and changed waitUntil strategy
       debugInfo += " | Page loaded"
 
-      // Wait for IKEA gallery elements to be rendered
-      await page
-        .waitForFunction(
-          () =>
-            document.querySelectorAll('[class*="pub__shoppable-image"]').length > 0 ||
-            document.querySelectorAll("img").length > 0,
-          { timeout: 10000 },
-        )
-        .catch(() => {
-          debugInfo += " | Gallery elements timeout (not critical)"
+      // Wait for gallery elements or fallback after timeout
+      try {
+        await page.waitForSelector('[class*="c1s88gxp"], [class*="pub__shoppable-image"], .product-item', {
+          timeout: 15000,
         })
+        debugInfo += " | Gallery elements found"
+      } catch {
+        debugInfo += " | Gallery selectors not found, continuing anyway"
+      }
 
-      // Extra wait for any dynamic content
-      await new Promise((resolve) => setTimeout(resolve, 5000)) // Extended dynamic content wait to 5 seconds
+      await new Promise((resolve) => setTimeout(resolve, 3000))
 
       html = await page.content()
       puppeteerUsed = true
