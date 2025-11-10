@@ -132,11 +132,15 @@ export default function Home() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <Tabs defaultValue="upload" className="w-full">
+                <Tabs defaultValue="manual" className="w-full">
                   <TabsList className="grid w-full max-w-xs grid-cols-2">
-                    <TabsTrigger value="upload">File Upload</TabsTrigger>
                     <TabsTrigger value="manual">Manual Input</TabsTrigger>
+                    <TabsTrigger value="upload">File Upload</TabsTrigger>
                   </TabsList>
+
+                  <TabsContent value="manual">
+                    <URLInput onSubmit={handleURLSubmit} />
+                  </TabsContent>
 
                   <TabsContent value="upload" className="space-y-4 pt-6">
                     <div
@@ -155,10 +159,6 @@ export default function Home() {
                         aria-label="Upload CSV file"
                       />
                     </div>
-                  </TabsContent>
-
-                  <TabsContent value="manual">
-                    <URLInput onSubmit={handleURLSubmit} />
                   </TabsContent>
                 </Tabs>
               </CardContent>

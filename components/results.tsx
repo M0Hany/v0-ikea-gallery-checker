@@ -1,7 +1,6 @@
 "use client"
-import { Button } from "@/components/ui/button"
 import { useState } from "react"
-import { ChevronDown, ChevronUp, AlertCircle, CheckCircle2 } from "lucide-react"
+import { AlertCircle, CheckCircle2 } from "lucide-react"
 
 interface BrokenGallery {
   page_url: string
@@ -40,6 +39,8 @@ export function Results({ items }: ResultsProps) {
     )
   }
 
+  const uniqueUrlItems = Array.from(new Map(items.map((item) => [item.page_url, item])).values())
+
   return (
     <div className="space-y-4">
       <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-lg">
@@ -48,12 +49,10 @@ export function Results({ items }: ResultsProps) {
             <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900">
               <th className="px-4 py-3 text-left font-semibold text-foreground">URL</th>
               <th className="px-4 py-3 text-left font-semibold text-foreground">Status</th>
-              <th className="px-4 py-3 text-left font-semibold text-foreground">Render Method</th>
-              <th className="px-4 py-3 text-left font-semibold text-foreground">Action</th>
             </tr>
           </thead>
           <tbody>
-            {items.map((item, idx) => (
+            {uniqueUrlItems.map((item, idx) => (
               <tr
                 key={idx}
                 className="border-b border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900/50"
@@ -82,26 +81,6 @@ export function Results({ items }: ResultsProps) {
                       </>
                     )}
                   </div>
-                </td>
-                <td className="px-4 py-3">
-                  <span className="text-xs font-mono px-2 py-1 rounded bg-slate-200 dark:bg-slate-800">
-                    {item.puppeteer_used ? "Puppeteer" : "Fetch"}
-                  </span>
-                </td>
-                <td className="px-4 py-3">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => toggleExpanded(item.page_url)}
-                    className="gap-1 text-xs"
-                  >
-                    <span>Show Code</span>
-                    {expandedUrls.has(item.page_url) ? (
-                      <ChevronUp className="w-3 h-3" />
-                    ) : (
-                      <ChevronDown className="w-3 h-3" />
-                    )}
-                  </Button>
                 </td>
               </tr>
             ))}

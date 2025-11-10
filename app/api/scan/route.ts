@@ -214,17 +214,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     const allItems: BrokenGallery[] = []
     let totalScanned = 0
-    let workingPages = 0
 
     for (const url of urls) {
       try {
         const items = await detectBrokenGalleries(url)
-
-        const brokenCount = items.filter((item) => item.status === "broken").length
-        if (brokenCount === 0) {
-          workingPages++
-        }
-
         allItems.push(...items)
         totalScanned++
       } catch (error) {
@@ -233,13 +226,32 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       }
     }
 
-    const brokenItems = allItems.filter((item) => item.status === "broken")
+    const urlStatusMap = new Map<string, BrokenGallery>()
+
+    for (const item of allItems) {
+      if (!urlStatusMap.has(item.page_url)) {
+        // First time seeing this URL - store it
+        urlStatusMap.set(item.page_url, item)
+      } else {
+        const existing = urlStatusMap.get(item.page_url)!
+        // If this item is broken, mark the URL as broken
+        if (item.status === "broken") {
+          existing.status = "broken"
+          // Keep the most recent/relevant debug info
+          existing.debug_info = item.debug_info
+        }
+      }
+    }
+
+    const uniqueItems = Array.from(urlStatusMap.values())
+    const brokenCount = uniqueItems.filter((item) => item.status === "broken").length
+    const workingCount = uniqueItems.length - brokenCount
 
     const result: ScanResult = {
       total_pages: totalScanned,
-      broken_count: brokenItems.length,
-      working_count: workingPages,
-      items: allItems, // Return all items including working status
+      broken_count: brokenCount,
+      working_count: workingCount,
+      items: uniqueItems,
     }
 
     return NextResponse.json(result)
