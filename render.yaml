@@ -4,10 +4,10 @@ services:
     env: node
     region: oregon
     plan: starter
-    
-    buildCommand: npm install && npm run build
+
+    buildCommand: npm install && npx puppeteer install chrome
     startCommand: npm start
-    
+
     nixpacks:
       packages:
         - ca-certificates
@@ -21,7 +21,14 @@ services:
         - libgconf-2-4
         - libappindicator3-1
         - libpangocairo-1.0
-      
+        - libasound2
+        - libatk1.0-0
+        - libatk-bridge2.0-0
+        - libcups2
+        - libdrm2
+        - libgbm1
+        - libgtk-3-0
+
     envVars:
       - key: NODE_ENV
         value: production
