@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { AbortSignal } from "abort-controller"
+import { AbortController } from "node-abort-controller"
 
 interface BrokenGallery {
   page_url: string
@@ -64,30 +64,40 @@ async function detectBrokenGalleries(url: string): Promise<BrokenGallery[]> {
     } catch (puppeteerError) {
       debugInfo += ` | Puppeteer failed: ${puppeteerError instanceof Error ? puppeteerError.message : "Unknown error"}`
 
-      const response = await fetch(url, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        },
-        signal: AbortSignal.timeout(15000),
-      })
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 15000)
 
-      if (!response.ok) {
-        return [
-          {
-            page_url: url,
-            image_url: "N/A",
-            alt_text: "",
-            reason: `Page returned status ${response.status}`,
-            status: "broken",
-            scraped_html: "",
-            puppeteer_used: false,
-            debug_info: debugInfo + ` | Fetch status: ${response.status}`,
+      try {
+        const response = await fetch(url, {
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
           },
-        ]
-      }
+          signal: controller.signal,
+        })
 
-      html = await response.text()
-      debugInfo += " | Using fetch fallback (no JS execution)"
+        clearTimeout(timeoutId)
+
+        if (!response.ok) {
+          return [
+            {
+              page_url: url,
+              image_url: "N/A",
+              alt_text: "",
+              reason: `Page returned status ${response.status}`,
+              status: "broken",
+              scraped_html: "",
+              puppeteer_used: false,
+              debug_info: debugInfo + ` | Fetch status: ${response.status}`,
+            },
+          ]
+        }
+
+        html = await response.text()
+        debugInfo += " | Using fetch fallback (no JS execution)"
+      } catch (fetchError) {
+        clearTimeout(timeoutId)
+        throw fetchError
+      }
     }
 
     const brokenItems: BrokenGallery[] = []
