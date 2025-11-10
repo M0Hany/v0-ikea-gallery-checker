@@ -1,58 +1,33 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { AbortController } from "node-abort-controller"
+import type { BrokenGallery } from "@/types" // import from types file
+import { detectCloudflareBlocking } from "@/lib/utils" // import from lib/utils
 
-interface BrokenGallery {
-  page_url: string
-  image_url: string
-  alt_text: string
-  reason: string
-  status: "broken" | "working" | "no curated gallery"
-  scraped_html: string
-  puppeteer_used: boolean
-  debug_info: string
-  cloudflare_blocked: boolean
+// ... existing interfaces and functions ...
+
+function createStreamWriter() {
+  const chunks: string[] = []
+  return {
+    write: (data: any) => {
+      const chunk = `data: ${JSON.stringify(data)}\n`
+      chunks.push(chunk)
+    },
+    getChunks: () => chunks,
+  }
 }
 
-interface ScanResult {
-  total_pages: number
-  broken_count: number
-  working_count: number
-  no_gallery_count: number
-  cloudflare_blocked_count: number
-  items: BrokenGallery[]
-}
-
-function detectCloudflareBlocking(status: number, headers: Headers, html: string): boolean {
-  // Check for Cloudflare status codes
-  if (status === 403 || status === 429 || status === 503) {
-    return true
-  }
-  // Check for Cloudflare-specific headers
-  if (headers.get("server")?.includes("cloudflare") || headers.get("cf-ray")) {
-    return true
-  }
-  // Check for Cloudflare challenge page content
-  if (
-    html.includes("You are being rate limited") ||
-    html.includes("Checking your browser") ||
-    html.includes("cloudflare-challenge") ||
-    html.includes("Ray ID:")
-  ) {
-    return true
-  }
-  return false
-}
-
-async function detectBrokenGalleries(url: string): Promise<BrokenGallery[]> {
+async function detectBrokenGalleriesWithSteps(url: string, onStep: (step: string) => void): Promise<BrokenGallery[]> {
   try {
     let html: string
     let puppeteerUsed = false
-    let debugInfo = ""
+    const debugInfo = ""
     let cloudflareBlocked = false
+
+    onStep("Initializing...")
 
     try {
       const puppeteer = await import("puppeteer")
-      debugInfo = "Puppeteer imported successfully"
+      onStep("Puppeteer loaded")
 
       const launchOptions: any = {
         headless: true,
@@ -68,36 +43,36 @@ async function detectBrokenGalleries(url: string): Promise<BrokenGallery[]> {
 
       if (process.env.PUPPETEER_EXECUTABLE_PATH) {
         launchOptions.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH
-        debugInfo += " | Using system Chromium"
       }
 
       const browser = await puppeteer.default.launch(launchOptions)
-      debugInfo += " | Browser launched"
+      onStep("Browser launched")
 
       const page = await browser.newPage()
 
       try {
         await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 })
-        debugInfo += " | Page loaded"
+        onStep("Page loaded")
       } catch (navError) {
-        debugInfo += ` | Navigation timeout after 30s`
         cloudflareBlocked = true
       }
 
       try {
         await page.waitForSelector('[class*="c1s88gxp"]', { timeout: 5000 })
-        debugInfo += " | Gallery elements found"
+        onStep("Gallery elements detected")
       } catch {
-        debugInfo += " | No gallery selectors found"
+        onStep("Waiting for dynamic content...")
       }
 
+      onStep("Waiting for content to render...")
       await new Promise((resolve) => setTimeout(resolve, 1000))
 
       html = await page.content()
+      onStep("Capturing DOM...")
       puppeteerUsed = true
-      debugInfo += " | Final DOM captured"
 
       await browser.close()
+      onStep("Extracting galleries...")
 
       const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i)
       if (bodyMatch) {
@@ -107,7 +82,7 @@ async function detectBrokenGalleries(url: string): Promise<BrokenGallery[]> {
         html = html.replace(/\s+(on\w+|data-[a-z-]*)\s*=\s*"[^"]*"/gi, "")
       }
     } catch (puppeteerError) {
-      debugInfo += ` | Puppeteer failed: ${puppeteerError instanceof Error ? puppeteerError.message : "Unknown error"}`
+      onStep("Puppeteer failed, using fetch...")
 
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), 10000)
@@ -125,7 +100,7 @@ async function detectBrokenGalleries(url: string): Promise<BrokenGallery[]> {
 
         cloudflareBlocked = detectCloudflareBlocking(response.status, response.headers, await response.text())
         if (cloudflareBlocked) {
-          debugInfo += " | Cloudflare blocking detected"
+          onStep("Cloudflare blocking detected")
           return [
             {
               page_url: url,
@@ -135,7 +110,7 @@ async function detectBrokenGalleries(url: string): Promise<BrokenGallery[]> {
               status: "broken",
               scraped_html: "",
               puppeteer_used: false,
-              debug_info: debugInfo,
+              debug_info: "Cloudflare blocking detected",
               cloudflare_blocked: true,
             },
           ]
@@ -151,14 +126,14 @@ async function detectBrokenGalleries(url: string): Promise<BrokenGallery[]> {
               status: "broken",
               scraped_html: "",
               puppeteer_used: false,
-              debug_info: debugInfo + ` | Fetch status: ${response.status}`,
+              debug_info: `Fetch status: ${response.status}`,
               cloudflare_blocked: false,
             },
           ]
         }
 
         html = await response.text()
-        debugInfo += " | Using fetch fallback (no JS execution)"
+        onStep("Content fetched")
       } catch (fetchError) {
         clearTimeout(timeoutId)
         throw fetchError
@@ -166,11 +141,13 @@ async function detectBrokenGalleries(url: string): Promise<BrokenGallery[]> {
     }
 
     const brokenItems: BrokenGallery[] = []
+    onStep("Analyzing galleries...")
 
     const containerRegex = /<div[^>]*class="[^"]*c1s88gxp[^"]*a1wqrctr[^"]*"[^>]*>([\s\S]*?)<\/div>/g
     const containers = Array.from(html.matchAll(containerRegex))
 
     if (containers.length === 0) {
+      onStep("No curated galleries found")
       return [
         {
           page_url: url,
@@ -185,6 +162,8 @@ async function detectBrokenGalleries(url: string): Promise<BrokenGallery[]> {
         },
       ]
     }
+
+    onStep(`Found ${containers.length} gallery container(s)`)
 
     let containerMatch
     while ((containerMatch = containerRegex.exec(html)) !== null) {
@@ -236,9 +215,11 @@ async function detectBrokenGalleries(url: string): Promise<BrokenGallery[]> {
       }
     }
 
+    onStep("Analysis complete")
     return brokenItems
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Unknown error"
+    onStep(`Error: ${errorMessage}`)
     return [
       {
         page_url: url,
@@ -255,6 +236,8 @@ async function detectBrokenGalleries(url: string): Promise<BrokenGallery[]> {
   }
 }
 
+// ... existing detectCloudflareBlocking function ...
+
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     const { urls } = (await request.json()) as { urls: string[] }
@@ -263,53 +246,62 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: "No URLs provided" } as any, { status: 400 })
     }
 
-    const allItems: BrokenGallery[] = []
-    let totalScanned = 0
+    const encoder = new TextEncoder()
+    const stream = new ReadableStream({
+      async start(controller) {
+        for (const url of urls) {
+          const steps: string[] = []
+          const onStep = (step: string) => {
+            steps.push(step)
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({
+                  url,
+                  status: "processing",
+                  steps,
+                })}\n`,
+              ),
+            )
+          }
 
-    for (const url of urls) {
-      try {
-        const items = await detectBrokenGalleries(url)
-        allItems.push(...items)
-        totalScanned++
-      } catch (error) {
-        console.error(`Error scanning ${url}:`, error)
-        totalScanned++
-      }
-    }
+          try {
+            const items = await detectBrokenGalleriesWithSteps(url, onStep)
 
-    const urlStatusMap = new Map<string, BrokenGallery>()
-
-    for (const item of allItems) {
-      if (!urlStatusMap.has(item.page_url)) {
-        urlStatusMap.set(item.page_url, item)
-      } else {
-        const existing = urlStatusMap.get(item.page_url)!
-        if (item.status === "broken") {
-          existing.status = "broken"
-          existing.cloudflare_blocked = item.cloudflare_blocked || existing.cloudflare_blocked
-          existing.debug_info = item.debug_info
-        } else if (item.status === "no curated gallery" && existing.status === "working") {
-          existing.status = "no curated gallery"
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({
+                  url,
+                  status: "completed",
+                  steps,
+                  result: { items },
+                })}\n`,
+              ),
+            )
+          } catch (error) {
+            console.error(`Error scanning ${url}:`, error)
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({
+                  url,
+                  status: "completed",
+                  steps: [...steps, "Failed"],
+                  result: { items: [] },
+                })}\n`,
+              ),
+            )
+          }
         }
-      }
-    }
+        controller.close()
+      },
+    })
 
-    const uniqueItems = Array.from(urlStatusMap.values())
-    const brokenCount = uniqueItems.filter((item) => item.status === "broken").length
-    const workingCount = uniqueItems.filter((item) => item.status === "working").length
-    const noCuratedGalleryCount = uniqueItems.filter((item) => item.status === "no curated gallery").length
-    const cloudflareBlockedCount = uniqueItems.filter((item) => item.cloudflare_blocked).length
-
-    const result: ScanResult = {
-      total_pages: totalScanned,
-      broken_count: brokenCount,
-      working_count: workingCount,
-      no_gallery_count: noCuratedGalleryCount,
-      cloudflare_blocked_count: cloudflareBlockedCount,
-      items: uniqueItems,
-    }
-
-    return NextResponse.json(result)
+    return new NextResponse(stream, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      },
+    })
   } catch (error) {
     console.error("API error:", error)
     return NextResponse.json({ error: "Internal server error" } as any, { status: 500 })

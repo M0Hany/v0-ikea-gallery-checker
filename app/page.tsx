@@ -22,13 +22,23 @@ interface ScanResult {
   total_pages: number
   broken_count: number
   working_count: number
-  items: BrokenGallery[]
+  no_gallery_count: number
+  cloudflare_blocked_count: number
+  items: any[]
+}
+
+interface URLScanStatus {
+  url: string
+  status: "pending" | "processing" | "completed"
+  steps: string[]
+  result?: any
 }
 
 export default function Home() {
   const [isScanning, setIsScanning] = useState(false)
   const [scanProgress, setScanProgress] = useState(0)
   const [results, setResults] = useState<ScanResult | null>(null)
+  const [liveResults, setLiveResults] = useState<URLScanStatus[]>([]) // add live results state for streaming
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -61,6 +71,7 @@ export default function Home() {
     setIsScanning(true)
     setScanProgress(0)
     setResults(null)
+    setLiveResults(urls.map((url) => ({ url, status: "pending", steps: [] }))) // initialize live results
 
     try {
       const response = await fetch("/api/scan", {
@@ -71,8 +82,79 @@ export default function Home() {
 
       if (!response.ok) throw new Error("Scan failed")
 
-      const data: ScanResult = await response.json()
-      setResults(data)
+      const reader = response.body?.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ""
+
+      while (reader) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split("\n")
+
+        // Keep the incomplete line in the buffer
+        buffer = lines.pop() || ""
+
+        for (const line of lines) {
+          if (line.trim().startsWith("data: ")) {
+            try {
+              const data = JSON.parse(line.slice(6))
+
+              // Update live results with new URL status
+              setLiveResults((prev) =>
+                prev.map((item) =>
+                  item.url === data.url
+                    ? { ...item, status: data.status, steps: data.steps, result: data.result }
+                    : item,
+                ),
+              )
+
+              setScanProgress(
+                Math.round((urls.filter((u, i) => liveResults[i]?.status === "completed").length / urls.length) * 100),
+              )
+            } catch (e) {
+              // Ignore parse errors
+            }
+          }
+        }
+      }
+
+      // Final aggregation
+      const allItems: any[] = []
+      for (const item of liveResults) {
+        if (item.result?.items) {
+          allItems.push(...item.result.items)
+        }
+      }
+
+      const urlStatusMap = new Map<string, any>()
+      for (const item of allItems) {
+        if (!urlStatusMap.has(item.page_url)) {
+          urlStatusMap.set(item.page_url, item)
+        } else {
+          const existing = urlStatusMap.get(item.page_url)!
+          if (item.status === "broken") {
+            existing.status = "broken"
+            existing.cloudflare_blocked = item.cloudflare_blocked || existing.cloudflare_blocked
+          }
+        }
+      }
+
+      const uniqueItems = Array.from(urlStatusMap.values())
+      const brokenCount = uniqueItems.filter((item) => item.status === "broken").length
+      const workingCount = uniqueItems.filter((item) => item.status === "working").length
+      const noCuratedGalleryCount = uniqueItems.filter((item) => item.status === "no curated gallery").length
+      const cloudflareBlockedCount = uniqueItems.filter((item) => item.cloudflare_blocked).length
+
+      setResults({
+        total_pages: urls.length,
+        broken_count: brokenCount,
+        working_count: workingCount,
+        no_gallery_count: noCuratedGalleryCount,
+        cloudflare_blocked_count: cloudflareBlockedCount,
+        items: uniqueItems,
+      })
       setScanProgress(100)
     } catch (error) {
       console.error("Scan error:", error)
@@ -170,19 +252,46 @@ export default function Home() {
             <Card className="border-0 shadow-lg">
               <CardHeader>
                 <CardTitle>Scanning in Progress</CardTitle>
-                <CardDescription>Checking IKEA pages for broken curated galleries...</CardDescription>
+                <CardDescription>Processing URLs sequentially...</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div>
                   <div className="flex justify-between mb-2">
-                    <span className="text-sm font-medium">Progress</span>
+                    <span className="text-sm font-medium">Overall Progress</span>
                     <span className="text-sm text-muted-foreground">{Math.round(scanProgress)}%</span>
                   </div>
                   <Progress value={scanProgress} className="h-2" />
                 </div>
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-                  Scanning URLs...
+
+                <div className="space-y-3 mt-6">
+                  {liveResults.map((item, idx) => (
+                    <div
+                      key={idx}
+                      className="p-3 bg-slate-50 dark:bg-slate-900 rounded border border-slate-200 dark:border-slate-800"
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="mt-1">
+                          {item.status === "completed" && <CheckCircle2 className="w-5 h-5 text-green-600" />}
+                          {item.status === "processing" && (
+                            <div className="w-5 h-5 rounded-full border-2 border-blue-600 border-t-transparent animate-spin" />
+                          )}
+                          {item.status === "pending" && (
+                            <div className="w-5 h-5 rounded-full border-2 border-slate-300 dark:border-slate-600" />
+                          )}
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-xs font-mono text-foreground break-all mb-2">{item.url}</p>
+                          <div className="space-y-1">
+                            {item.steps.map((step, sidx) => (
+                              <p key={sidx} className="text-xs text-muted-foreground">
+                                ✓ {step}
+                              </p>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </CardContent>
             </Card>
@@ -218,6 +327,26 @@ export default function Home() {
                       <CheckCircle2 className="w-6 h-6 mx-auto mb-2 text-green-600" />
                       <p className="text-muted-foreground text-sm mb-2">Working Galleries</p>
                       <p className="text-3xl font-bold text-green-600">{results.working_count}</p>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-0 shadow-lg bg-orange-50 dark:bg-orange-950/20">
+                  <CardContent className="pt-6">
+                    <div className="text-center">
+                      <AlertCircle className="w-6 h-6 mx-auto mb-2 text-orange-600" />
+                      <p className="text-muted-foreground text-sm mb-2">No Curated Gallery</p>
+                      <p className="text-3xl font-bold text-orange-600">{results.no_gallery_count}</p>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-0 shadow-lg bg-pink-50 dark:bg-pink-950/20">
+                  <CardContent className="pt-6">
+                    <div className="text-center">
+                      <AlertCircle className="w-6 h-6 mx-auto mb-2 text-pink-600" />
+                      <p className="text-muted-foreground text-sm mb-2">Cloudflare Blocked</p>
+                      <p className="text-3xl font-bold text-pink-600">{results.cloudflare_blocked_count}</p>
                     </div>
                   </CardContent>
                 </Card>
