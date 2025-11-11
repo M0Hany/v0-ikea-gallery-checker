@@ -288,12 +288,6 @@ export default function Home() {
                     <CardTitle>Scan Results</CardTitle>
                     <CardDescription>{results.total_pages} total pages scanned</CardDescription>
                   </div>
-                  {results.items.length > 0 && (
-                    <Button onClick={exportToCSV} variant="outline" size="sm" className="gap-2 bg-transparent">
-                      <Download className="w-4 h-4" />
-                      Export CSV
-                    </Button>
-                  )}
                 </CardHeader>
                 <CardContent>
                   <Results items={liveResults} isLive={false} />
@@ -311,6 +305,10 @@ export default function Home() {
                   size="lg"
                 >
                   Scan Again
+                </Button>
+                <Button onClick={exportToCSV} variant="outline" size="lg" className="gap-2 bg-transparent">
+                  <Download className="w-4 h-4" />
+                  Export CSV
                 </Button>
               </div>
             </div>
