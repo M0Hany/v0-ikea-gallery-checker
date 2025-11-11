@@ -1,9 +1,20 @@
-// ... existing imports ...
 import { type NextRequest, NextResponse } from "next/server"
-import type { BrokenGallery } from "./types" // Assuming BrokenGallery is defined in a types file
-import { detectCloudflareBlocking } from "@/lib/utils" // Fix import path for detectCloudflareBlocking from relative to absolute
+import { AbortController } from "node-abort-controller"
+import type { BrokenGallery } from "@/types" // import from types file
+import { detectCloudflareBlocking } from "@/lib/utils" // import from lib/utils
 
-// ... existing helper functions ...
+// ... existing interfaces and functions ...
+
+function createStreamWriter() {
+  const chunks: string[] = []
+  return {
+    write: (data: any) => {
+      const chunk = `data: ${JSON.stringify(data)}\n`
+      chunks.push(chunk)
+    },
+    getChunks: () => chunks,
+  }
+}
 
 async function detectBrokenGalleriesWithSteps(url: string, onStep: (step: string) => void): Promise<BrokenGallery[]> {
   try {
@@ -240,9 +251,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       async start(controller) {
         for (const url of urls) {
           const steps: string[] = []
-          let finalStatus: "pending" | "processing" | "completed" = "processing"
-          let finalResult: any = { items: [] }
-
           const onStep = (step: string) => {
             steps.push(step)
             controller.enqueue(
@@ -251,7 +259,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
                   url,
                   status: "processing",
                   steps,
-                  currentStep: step,
                 })}\n`,
               ),
             )
@@ -260,52 +267,25 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           try {
             const items = await detectBrokenGalleriesWithSteps(url, onStep)
 
-            let urlStatus: "working" | "broken" | "no curated gallery" = "working"
-            let hasAnyBroken = false
-            let hasAnyWorking = false
-            let hasNoGallery = false
-
-            for (const item of items) {
-              if (item.status === "broken") {
-                hasAnyBroken = true
-              } else if (item.status === "working") {
-                hasAnyWorking = true
-              } else if (item.status === "no curated gallery") {
-                hasNoGallery = true
-              }
-            }
-
-            if (hasAnyBroken) {
-              urlStatus = "broken"
-            } else if (hasNoGallery && !hasAnyWorking) {
-              urlStatus = "no curated gallery"
-            } else if (hasAnyWorking) {
-              urlStatus = "working"
-            }
-
-            finalStatus = "completed"
-            finalResult = { items }
-
             controller.enqueue(
               encoder.encode(
                 `data: ${JSON.stringify({
                   url,
-                  status: urlStatus,
+                  status: "completed",
                   steps,
-                  currentStep: "Complete",
-                  result: finalResult,
+                  result: { items },
                 })}\n`,
               ),
             )
           } catch (error) {
-            console.error(`Error scanning ${url}:`, error)
+            const errorMessage = error instanceof Error ? error.message : "Unknown error occurred"
             controller.enqueue(
               encoder.encode(
                 `data: ${JSON.stringify({
                   url,
-                  status: "broken",
+                  status: "error",
                   steps: [...steps, "Failed"],
-                  currentStep: "Failed",
+                  error: `Scan failed: ${errorMessage}`,
                   result: { items: [] },
                 })}\n`,
               ),

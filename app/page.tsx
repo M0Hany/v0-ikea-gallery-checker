@@ -6,7 +6,7 @@ import { useState, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Upload, Zap, Download } from "lucide-react"
+import { Upload, Zap, CheckCircle2, AlertCircle, Download } from "lucide-react"
 import { URLInput } from "@/components/url-input"
 import { Results } from "@/components/results"
 import { Progress } from "@/components/ui/progress"
@@ -29,15 +29,10 @@ interface ScanResult {
 
 interface URLScanStatus {
   url: string
-  status: "pending" | "processing" | "completed"
+  status: "pending" | "processing" | "completed" | "error"
   steps: string[]
   result?: any
-}
-
-const calculateProgress = (liveResults: URLScanStatus[]): number => {
-  if (liveResults.length === 0) return 0
-  const completed = liveResults.filter((item) => item.status !== "pending" && item.status !== "processing").length
-  return Math.round((completed / liveResults.length) * 100)
+  error?: string
 }
 
 export default function Home() {
@@ -77,7 +72,7 @@ export default function Home() {
     setIsScanning(true)
     setScanProgress(0)
     setResults(null)
-    setLiveResults(urls.map((url) => ({ url, status: "pending", steps: [] }))) // initialize live results
+    setLiveResults(urls.map((url) => ({ url, status: "pending", steps: [] })))
 
     try {
       const response = await fetch("/api/scan", {
@@ -98,6 +93,7 @@ export default function Home() {
 
         buffer += decoder.decode(value, { stream: true })
         const lines = buffer.split("\n")
+
         buffer = lines.pop() || ""
 
         for (const line of lines) {
@@ -105,24 +101,28 @@ export default function Home() {
             try {
               const data = JSON.parse(line.slice(6))
 
-              setLiveResults((prev) => {
-                const updated = prev.map((item) =>
+              setLiveResults((prev) =>
+                prev.map((item) =>
                   item.url === data.url
                     ? {
                         ...item,
                         status: data.status,
                         steps: data.steps,
                         result: data.result,
+                        error: data.error,
                       }
                     : item,
-                )
-                const completed = updated.filter(
-                  (item) => item.status !== "pending" && item.status !== "processing",
-                ).length
-                const progress = Math.round((completed / urls.length) * 100)
-                setScanProgress(progress)
-                return updated
-              })
+                ),
+              )
+
+              setScanProgress(
+                Math.round(
+                  (urls.filter((u, i) => liveResults[i]?.status === "completed" || liveResults[i]?.status === "error")
+                    .length /
+                    urls.length) *
+                    100,
+                ),
+              )
             } catch (e) {
               // Ignore parse errors
             }
@@ -168,7 +168,6 @@ export default function Home() {
       setScanProgress(100)
     } catch (error) {
       console.error("Scan error:", error)
-      alert("Failed to complete scan. Please try again.")
     } finally {
       setIsScanning(false)
     }
@@ -179,20 +178,11 @@ export default function Home() {
   }
 
   const exportToCSV = () => {
-    if (!liveResults || liveResults.length === 0) return
+    if (!results?.items) return
 
     const csv = [
-      ["URL", "Status"],
-      ...liveResults.map((item) => {
-        let statusText = item.status
-        if (item.status === "broken") statusText = "BROKEN"
-        else if (item.status === "working") statusText = "WORKING"
-        else if (item.status === "no curated gallery") statusText = "NO GALLERY"
-        else if (item.status === "processing") statusText = "PROCESSING"
-        else statusText = "PENDING"
-
-        return [item.url, statusText]
-      }),
+      ["Page URL", "Image URL", "Alt Text", "Reason"],
+      ...results.items.map((item) => [item.page_url, item.image_url, item.alt_text, item.reason]),
     ]
       .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","))
       .join("\n")
@@ -201,7 +191,7 @@ export default function Home() {
     const url = window.URL.createObjectURL(blob)
     const a = document.createElement("a")
     a.href = url
-    a.download = "ikea_gallery_checker_results.csv"
+    a.download = "broken_curated_galleries.csv"
     a.click()
     window.URL.revokeObjectURL(url)
   }
@@ -282,7 +272,44 @@ export default function Home() {
                   <Progress value={scanProgress} className="h-2" />
                 </div>
 
-                <Results items={liveResults} isLive={true} />
+                <div className="space-y-3 mt-6">
+                  {liveResults.map((item, idx) => (
+                    <div
+                      key={idx}
+                      className={`p-3 rounded border ${
+                        item.status === "error"
+                          ? "bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-800"
+                          : "bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-800"
+                      }`}
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="mt-1">
+                          {item.status === "completed" && <CheckCircle2 className="w-5 h-5 text-green-600" />}
+                          {item.status === "processing" && (
+                            <div className="w-5 h-5 rounded-full border-2 border-blue-600 border-t-transparent animate-spin" />
+                          )}
+                          {item.status === "error" && <AlertCircle className="w-5 h-5 text-red-600" />}
+                          {item.status === "pending" && (
+                            <div className="w-5 h-5 rounded-full border-2 border-slate-300 dark:border-slate-600" />
+                          )}
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-xs font-mono text-foreground break-all mb-2">{item.url}</p>
+                          {item.error && (
+                            <p className="text-xs text-red-600 dark:text-red-400 mb-2 font-medium">{item.error}</p>
+                          )}
+                          <div className="space-y-1">
+                            {item.steps.map((step, sidx) => (
+                              <p key={sidx} className="text-xs text-muted-foreground">
+                                ✓ {step}
+                              </p>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </CardContent>
             </Card>
           ) : null}
@@ -290,16 +317,77 @@ export default function Home() {
           {/* Results Section */}
           {results ? (
             <div className="space-y-6">
+              {/* Summary Cards */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <Card className="border-0 shadow-lg bg-white dark:bg-slate-950">
+                  <CardContent className="pt-6">
+                    <div className="text-center">
+                      <p className="text-muted-foreground text-sm mb-2">Total Pages Scanned</p>
+                      <p className="text-3xl font-bold text-foreground">{results.total_pages}</p>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-0 shadow-lg bg-red-50 dark:bg-red-950/20">
+                  <CardContent className="pt-6">
+                    <div className="text-center">
+                      <AlertCircle className="w-6 h-6 mx-auto mb-2 text-red-600" />
+                      <p className="text-muted-foreground text-sm mb-2">Broken Galleries</p>
+                      <p className="text-3xl font-bold text-red-600">{results.broken_count}</p>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-0 shadow-lg bg-green-50 dark:bg-green-950/20">
+                  <CardContent className="pt-6">
+                    <div className="text-center">
+                      <CheckCircle2 className="w-6 h-6 mx-auto mb-2 text-green-600" />
+                      <p className="text-muted-foreground text-sm mb-2">Working Galleries</p>
+                      <p className="text-3xl font-bold text-green-600">{results.working_count}</p>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-0 shadow-lg bg-orange-50 dark:bg-orange-950/20">
+                  <CardContent className="pt-6">
+                    <div className="text-center">
+                      <AlertCircle className="w-6 h-6 mx-auto mb-2 text-orange-600" />
+                      <p className="text-muted-foreground text-sm mb-2">No Curated Gallery</p>
+                      <p className="text-3xl font-bold text-orange-600">{results.no_gallery_count}</p>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-0 shadow-lg bg-pink-50 dark:bg-pink-950/20">
+                  <CardContent className="pt-6">
+                    <div className="text-center">
+                      <AlertCircle className="w-6 h-6 mx-auto mb-2 text-pink-600" />
+                      <p className="text-muted-foreground text-sm mb-2">Cloudflare Blocked</p>
+                      <p className="text-3xl font-bold text-pink-600">{results.cloudflare_blocked_count}</p>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
               {/* Results Table */}
               <Card className="border-0 shadow-lg">
                 <CardHeader className="flex flex-row items-center justify-between">
                   <div>
-                    <CardTitle>Scan Results</CardTitle>
-                    <CardDescription>{results.total_pages} total pages scanned</CardDescription>
+                    <CardTitle>Broken Galleries</CardTitle>
+                    <CardDescription>
+                      {results.items.length} broken curated gallery {results.items.length === 1 ? "image" : "images"}{" "}
+                      found
+                    </CardDescription>
                   </div>
+                  {results.items.length > 0 && (
+                    <Button onClick={exportToCSV} variant="outline" size="sm" className="gap-2 bg-transparent">
+                      <Download className="w-4 h-4" />
+                      Export CSV
+                    </Button>
+                  )}
                 </CardHeader>
                 <CardContent>
-                  <Results items={liveResults} isLive={false} />
+                  <Results items={results.items} />
                 </CardContent>
               </Card>
 
@@ -314,10 +402,6 @@ export default function Home() {
                   size="lg"
                 >
                   Scan Again
-                </Button>
-                <Button onClick={exportToCSV} variant="outline" size="lg" className="gap-2 bg-transparent">
-                  <Download className="w-4 h-4" />
-                  Export CSV
                 </Button>
               </div>
             </div>
