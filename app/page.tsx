@@ -34,11 +34,17 @@ interface URLScanStatus {
   result?: any
 }
 
+const calculateProgress = (liveResults: URLScanStatus[]): number => {
+  if (liveResults.length === 0) return 0
+  const completed = liveResults.filter((item) => item.status !== "pending" && item.status !== "processing").length
+  return Math.round((completed / liveResults.length) * 100)
+}
+
 export default function Home() {
   const [isScanning, setIsScanning] = useState(false)
   const [scanProgress, setScanProgress] = useState(0)
   const [results, setResults] = useState<ScanResult | null>(null)
-  const [liveResults, setLiveResults] = useState<URLScanStatus[]>([]) // add live results state for streaming
+  const [liveResults, setLiveResults] = useState<URLScanStatus[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -92,8 +98,6 @@ export default function Home() {
 
         buffer += decoder.decode(value, { stream: true })
         const lines = buffer.split("\n")
-
-        // Keep the incomplete line in the buffer
         buffer = lines.pop() || ""
 
         for (const line of lines) {
@@ -101,18 +105,24 @@ export default function Home() {
             try {
               const data = JSON.parse(line.slice(6))
 
-              // Update live results with new URL status
-              setLiveResults((prev) =>
-                prev.map((item) =>
+              setLiveResults((prev) => {
+                const updated = prev.map((item) =>
                   item.url === data.url
-                    ? { ...item, status: data.status, steps: data.steps, result: data.result }
+                    ? {
+                        ...item,
+                        status: data.status,
+                        steps: data.steps,
+                        result: data.result,
+                      }
                     : item,
-                ),
-              )
-
-              setScanProgress(
-                Math.round((urls.filter((u, i) => liveResults[i]?.status === "completed").length / urls.length) * 100),
-              )
+                )
+                const completed = updated.filter(
+                  (item) => item.status !== "pending" && item.status !== "processing",
+                ).length
+                const progress = Math.round((completed / urls.length) * 100)
+                setScanProgress(progress)
+                return updated
+              })
             } catch (e) {
               // Ignore parse errors
             }
