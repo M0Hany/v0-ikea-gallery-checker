@@ -282,52 +282,43 @@ export default function Home() {
           {results ? (
             <div className="space-y-6">
               {/* Summary Cards */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <Card className="border-0 shadow-lg bg-white dark:bg-slate-950">
-                  <CardContent className="pt-6">
-                    <div className="text-center">
-                      <p className="text-muted-foreground text-sm mb-2">Total Pages Scanned</p>
-                      <p className="text-3xl font-bold text-foreground">{results.total_pages}</p>
-                    </div>
-                  </CardContent>
-                </Card>
-
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <Card className="border-0 shadow-lg bg-red-50 dark:bg-red-950/20">
-                  <CardContent className="pt-6">
+                  <CardContent className="pt-4 pb-4">
                     <div className="text-center">
-                      <AlertCircle className="w-6 h-6 mx-auto mb-2 text-red-600" />
-                      <p className="text-muted-foreground text-sm mb-2">Broken Galleries</p>
-                      <p className="text-3xl font-bold text-red-600">{results.broken_count}</p>
+                      <AlertCircle className="w-5 h-5 mx-auto mb-1 text-red-600" />
+                      <p className="text-muted-foreground text-xs mb-1">Broken Galleries</p>
+                      <p className="text-2xl font-bold text-red-600">{results.broken_count}</p>
                     </div>
                   </CardContent>
                 </Card>
 
                 <Card className="border-0 shadow-lg bg-green-50 dark:bg-green-950/20">
-                  <CardContent className="pt-6">
+                  <CardContent className="pt-4 pb-4">
                     <div className="text-center">
-                      <CheckCircle2 className="w-6 h-6 mx-auto mb-2 text-green-600" />
-                      <p className="text-muted-foreground text-sm mb-2">Working Galleries</p>
-                      <p className="text-3xl font-bold text-green-600">{results.working_count}</p>
+                      <CheckCircle2 className="w-5 h-5 mx-auto mb-1 text-green-600" />
+                      <p className="text-muted-foreground text-xs mb-1">Working Galleries</p>
+                      <p className="text-2xl font-bold text-green-600">{results.working_count}</p>
                     </div>
                   </CardContent>
                 </Card>
 
                 <Card className="border-0 shadow-lg bg-orange-50 dark:bg-orange-950/20">
-                  <CardContent className="pt-6">
+                  <CardContent className="pt-4 pb-4">
                     <div className="text-center">
-                      <AlertCircle className="w-6 h-6 mx-auto mb-2 text-orange-600" />
-                      <p className="text-muted-foreground text-sm mb-2">No Curated Gallery</p>
-                      <p className="text-3xl font-bold text-orange-600">{results.no_gallery_count}</p>
+                      <AlertCircle className="w-5 h-5 mx-auto mb-1 text-orange-600" />
+                      <p className="text-muted-foreground text-xs mb-1">No Curated Gallery</p>
+                      <p className="text-2xl font-bold text-orange-600">{results.no_gallery_count}</p>
                     </div>
                   </CardContent>
                 </Card>
 
                 <Card className="border-0 shadow-lg bg-pink-50 dark:bg-pink-950/20">
-                  <CardContent className="pt-6">
+                  <CardContent className="pt-4 pb-4">
                     <div className="text-center">
-                      <AlertCircle className="w-6 h-6 mx-auto mb-2 text-pink-600" />
-                      <p className="text-muted-foreground text-sm mb-2">Cloudflare Blocked</p>
-                      <p className="text-3xl font-bold text-pink-600">{results.cloudflare_blocked_count}</p>
+                      <AlertCircle className="w-5 h-5 mx-auto mb-1 text-pink-600" />
+                      <p className="text-muted-foreground text-xs mb-1">Cloudflare Blocked</p>
+                      <p className="text-2xl font-bold text-pink-600">{results.cloudflare_blocked_count}</p>
                     </div>
                   </CardContent>
                 </Card>
