@@ -263,36 +263,7 @@ export default function Home() {
                   <Progress value={scanProgress} className="h-2" />
                 </div>
 
-                <div className="space-y-3 mt-6">
-                  {liveResults.map((item, idx) => (
-                    <div
-                      key={idx}
-                      className="p-3 bg-slate-50 dark:bg-slate-900 rounded border border-slate-200 dark:border-slate-800"
-                    >
-                      <div className="flex items-start gap-3">
-                        <div className="mt-1">
-                          {item.status === "completed" && <CheckCircle2 className="w-5 h-5 text-green-600" />}
-                          {item.status === "processing" && (
-                            <div className="w-5 h-5 rounded-full border-2 border-blue-600 border-t-transparent animate-spin" />
-                          )}
-                          {item.status === "pending" && (
-                            <div className="w-5 h-5 rounded-full border-2 border-slate-300 dark:border-slate-600" />
-                          )}
-                        </div>
-                        <div className="flex-1">
-                          <p className="text-xs font-mono text-foreground break-all mb-2">{item.url}</p>
-                          <div className="space-y-1">
-                            {item.steps.map((step, sidx) => (
-                              <p key={sidx} className="text-xs text-muted-foreground">
-                                ✓ {step}
-                              </p>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                <Results items={liveResults} isLive={true} />
               </CardContent>
             </Card>
           ) : null}
@@ -356,11 +327,8 @@ export default function Home() {
               <Card className="border-0 shadow-lg">
                 <CardHeader className="flex flex-row items-center justify-between">
                   <div>
-                    <CardTitle>Broken Galleries</CardTitle>
-                    <CardDescription>
-                      {results.items.length} broken curated gallery {results.items.length === 1 ? "image" : "images"}{" "}
-                      found
-                    </CardDescription>
+                    <CardTitle>Scan Results</CardTitle>
+                    <CardDescription>{results.total_pages} total pages scanned</CardDescription>
                   </div>
                   {results.items.length > 0 && (
                     <Button onClick={exportToCSV} variant="outline" size="sm" className="gap-2 bg-transparent">
@@ -370,7 +338,7 @@ export default function Home() {
                   )}
                 </CardHeader>
                 <CardContent>
-                  <Results items={results.items} />
+                  <Results items={liveResults} isLive={false} />
                 </CardContent>
               </Card>
 
