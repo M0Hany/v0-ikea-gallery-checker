@@ -6,7 +6,7 @@ import { useState, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Upload, Zap, CheckCircle2, AlertCircle, Download } from "lucide-react"
+import { Upload, Zap, Download } from "lucide-react"
 import { URLInput } from "@/components/url-input"
 import { Results } from "@/components/results"
 import { Progress } from "@/components/ui/progress"
@@ -35,11 +35,18 @@ interface URLScanStatus {
   error?: string
 }
 
+const calculateProgress = (liveResults: URLScanStatus[]): number => {
+  if (liveResults.length === 0) return 0
+  const completed = liveResults.filter((item) => item.status !== "pending" && item.status !== "processing").length
+  return Math.round((completed / liveResults.length) * 100)
+}
+
 export default function Home() {
   const [isScanning, setIsScanning] = useState(false)
   const [scanProgress, setScanProgress] = useState(0)
   const [results, setResults] = useState<ScanResult | null>(null)
   const [liveResults, setLiveResults] = useState<URLScanStatus[]>([])
+  const [scanError, setScanError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -72,7 +79,8 @@ export default function Home() {
     setIsScanning(true)
     setScanProgress(0)
     setResults(null)
-    setLiveResults(urls.map((url) => ({ url, status: "pending", steps: [] })))
+    setScanError(null)
+    setLiveResults(urls.map((url) => ({ url, status: "pending", steps: [] }))) // initialize live results
 
     try {
       const response = await fetch("/api/scan", {
@@ -81,7 +89,7 @@ export default function Home() {
         body: JSON.stringify({ urls }),
       })
 
-      if (!response.ok) throw new Error("Scan failed")
+      if (!response.ok) throw new Error(`Server error: ${response.statusText}`)
 
       const reader = response.body?.getReader()
       const decoder = new TextDecoder()
@@ -93,7 +101,6 @@ export default function Home() {
 
         buffer += decoder.decode(value, { stream: true })
         const lines = buffer.split("\n")
-
         buffer = lines.pop() || ""
 
         for (const line of lines) {
@@ -101,8 +108,8 @@ export default function Home() {
             try {
               const data = JSON.parse(line.slice(6))
 
-              setLiveResults((prev) =>
-                prev.map((item) =>
+              setLiveResults((prev) => {
+                const updated = prev.map((item) =>
                   item.url === data.url
                     ? {
                         ...item,
@@ -112,17 +119,14 @@ export default function Home() {
                         error: data.error,
                       }
                     : item,
-                ),
-              )
-
-              setScanProgress(
-                Math.round(
-                  (urls.filter((u, i) => liveResults[i]?.status === "completed" || liveResults[i]?.status === "error")
-                    .length /
-                    urls.length) *
-                    100,
-                ),
-              )
+                )
+                const completed = updated.filter(
+                  (item) => item.status !== "pending" && item.status !== "processing",
+                ).length
+                const progress = Math.round((completed / urls.length) * 100)
+                setScanProgress(progress)
+                return updated
+              })
             } catch (e) {
               // Ignore parse errors
             }
@@ -130,7 +134,6 @@ export default function Home() {
         }
       }
 
-      // Final aggregation
       const allItems: any[] = []
       for (const item of liveResults) {
         if (item.result?.items) {
@@ -167,6 +170,8 @@ export default function Home() {
       })
       setScanProgress(100)
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Failed to complete scan. Please try again."
+      setScanError(errorMessage)
       console.error("Scan error:", error)
     } finally {
       setIsScanning(false)
@@ -178,11 +183,20 @@ export default function Home() {
   }
 
   const exportToCSV = () => {
-    if (!results?.items) return
+    if (!liveResults || liveResults.length === 0) return
 
     const csv = [
-      ["Page URL", "Image URL", "Alt Text", "Reason"],
-      ...results.items.map((item) => [item.page_url, item.image_url, item.alt_text, item.reason]),
+      ["URL", "Status"],
+      ...liveResults.map((item) => {
+        let statusText = item.status
+        if (item.status === "broken") statusText = "BROKEN"
+        else if (item.status === "working") statusText = "WORKING"
+        else if (item.status === "no curated gallery") statusText = "NO GALLERY"
+        else if (item.status === "processing") statusText = "PROCESSING"
+        else statusText = "PENDING"
+
+        return [item.url, statusText]
+      }),
     ]
       .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","))
       .join("\n")
@@ -191,7 +205,7 @@ export default function Home() {
     const url = window.URL.createObjectURL(blob)
     const a = document.createElement("a")
     a.href = url
-    a.download = "broken_curated_galleries.csv"
+    a.download = "ikea_gallery_checker_results.csv"
     a.click()
     window.URL.revokeObjectURL(url)
   }
@@ -264,6 +278,12 @@ export default function Home() {
                 <CardDescription>Processing URLs sequentially...</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
+                {scanError && (
+                  <div className="bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 text-red-800 dark:text-red-200 px-4 py-3 rounded-lg">
+                    <p className="font-medium">Error during scan:</p>
+                    <p className="text-sm">{scanError}</p>
+                  </div>
+                )}
                 <div>
                   <div className="flex justify-between mb-2">
                     <span className="text-sm font-medium">Overall Progress</span>
@@ -272,44 +292,7 @@ export default function Home() {
                   <Progress value={scanProgress} className="h-2" />
                 </div>
 
-                <div className="space-y-3 mt-6">
-                  {liveResults.map((item, idx) => (
-                    <div
-                      key={idx}
-                      className={`p-3 rounded border ${
-                        item.status === "error"
-                          ? "bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-800"
-                          : "bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-800"
-                      }`}
-                    >
-                      <div className="flex items-start gap-3">
-                        <div className="mt-1">
-                          {item.status === "completed" && <CheckCircle2 className="w-5 h-5 text-green-600" />}
-                          {item.status === "processing" && (
-                            <div className="w-5 h-5 rounded-full border-2 border-blue-600 border-t-transparent animate-spin" />
-                          )}
-                          {item.status === "error" && <AlertCircle className="w-5 h-5 text-red-600" />}
-                          {item.status === "pending" && (
-                            <div className="w-5 h-5 rounded-full border-2 border-slate-300 dark:border-slate-600" />
-                          )}
-                        </div>
-                        <div className="flex-1">
-                          <p className="text-xs font-mono text-foreground break-all mb-2">{item.url}</p>
-                          {item.error && (
-                            <p className="text-xs text-red-600 dark:text-red-400 mb-2 font-medium">{item.error}</p>
-                          )}
-                          <div className="space-y-1">
-                            {item.steps.map((step, sidx) => (
-                              <p key={sidx} className="text-xs text-muted-foreground">
-                                ✓ {step}
-                              </p>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                <Results items={liveResults} isLive={true} />
               </CardContent>
             </Card>
           ) : null}
@@ -317,77 +300,16 @@ export default function Home() {
           {/* Results Section */}
           {results ? (
             <div className="space-y-6">
-              {/* Summary Cards */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <Card className="border-0 shadow-lg bg-white dark:bg-slate-950">
-                  <CardContent className="pt-6">
-                    <div className="text-center">
-                      <p className="text-muted-foreground text-sm mb-2">Total Pages Scanned</p>
-                      <p className="text-3xl font-bold text-foreground">{results.total_pages}</p>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card className="border-0 shadow-lg bg-red-50 dark:bg-red-950/20">
-                  <CardContent className="pt-6">
-                    <div className="text-center">
-                      <AlertCircle className="w-6 h-6 mx-auto mb-2 text-red-600" />
-                      <p className="text-muted-foreground text-sm mb-2">Broken Galleries</p>
-                      <p className="text-3xl font-bold text-red-600">{results.broken_count}</p>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card className="border-0 shadow-lg bg-green-50 dark:bg-green-950/20">
-                  <CardContent className="pt-6">
-                    <div className="text-center">
-                      <CheckCircle2 className="w-6 h-6 mx-auto mb-2 text-green-600" />
-                      <p className="text-muted-foreground text-sm mb-2">Working Galleries</p>
-                      <p className="text-3xl font-bold text-green-600">{results.working_count}</p>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card className="border-0 shadow-lg bg-orange-50 dark:bg-orange-950/20">
-                  <CardContent className="pt-6">
-                    <div className="text-center">
-                      <AlertCircle className="w-6 h-6 mx-auto mb-2 text-orange-600" />
-                      <p className="text-muted-foreground text-sm mb-2">No Curated Gallery</p>
-                      <p className="text-3xl font-bold text-orange-600">{results.no_gallery_count}</p>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card className="border-0 shadow-lg bg-pink-50 dark:bg-pink-950/20">
-                  <CardContent className="pt-6">
-                    <div className="text-center">
-                      <AlertCircle className="w-6 h-6 mx-auto mb-2 text-pink-600" />
-                      <p className="text-muted-foreground text-sm mb-2">Cloudflare Blocked</p>
-                      <p className="text-3xl font-bold text-pink-600">{results.cloudflare_blocked_count}</p>
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
-
               {/* Results Table */}
               <Card className="border-0 shadow-lg">
                 <CardHeader className="flex flex-row items-center justify-between">
                   <div>
-                    <CardTitle>Broken Galleries</CardTitle>
-                    <CardDescription>
-                      {results.items.length} broken curated gallery {results.items.length === 1 ? "image" : "images"}{" "}
-                      found
-                    </CardDescription>
+                    <CardTitle>Scan Results</CardTitle>
+                    <CardDescription>{results.total_pages} total pages scanned</CardDescription>
                   </div>
-                  {results.items.length > 0 && (
-                    <Button onClick={exportToCSV} variant="outline" size="sm" className="gap-2 bg-transparent">
-                      <Download className="w-4 h-4" />
-                      Export CSV
-                    </Button>
-                  )}
                 </CardHeader>
                 <CardContent>
-                  <Results items={results.items} />
+                  <Results items={liveResults} isLive={false} />
                 </CardContent>
               </Card>
 
@@ -397,11 +319,16 @@ export default function Home() {
                   onClick={() => {
                     setResults(null)
                     setScanProgress(0)
+                    setScanError(null)
                   }}
                   variant="outline"
                   size="lg"
                 >
                   Scan Again
+                </Button>
+                <Button onClick={exportToCSV} variant="outline" size="lg" className="gap-2 bg-transparent">
+                  <Download className="w-4 h-4" />
+                  Export CSV
                 </Button>
               </div>
             </div>
