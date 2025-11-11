@@ -179,11 +179,20 @@ export default function Home() {
   }
 
   const exportToCSV = () => {
-    if (!results?.items) return
+    if (!liveResults || liveResults.length === 0) return
 
     const csv = [
-      ["Page URL", "Image URL", "Alt Text", "Reason"],
-      ...results.items.map((item) => [item.page_url, item.image_url, item.alt_text, item.reason]),
+      ["URL", "Status"],
+      ...liveResults.map((item) => {
+        let statusText = item.status
+        if (item.status === "broken") statusText = "BROKEN"
+        else if (item.status === "working") statusText = "WORKING"
+        else if (item.status === "no curated gallery") statusText = "NO GALLERY"
+        else if (item.status === "processing") statusText = "PROCESSING"
+        else statusText = "PENDING"
+
+        return [item.url, statusText]
+      }),
     ]
       .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","))
       .join("\n")
@@ -192,7 +201,7 @@ export default function Home() {
     const url = window.URL.createObjectURL(blob)
     const a = document.createElement("a")
     a.href = url
-    a.download = "broken_curated_galleries.csv"
+    a.download = "ikea_gallery_checker_results.csv"
     a.click()
     window.URL.revokeObjectURL(url)
   }
