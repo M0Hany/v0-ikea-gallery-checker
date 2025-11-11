@@ -6,7 +6,7 @@ import { useState, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Upload, Zap, CheckCircle2, AlertCircle, Download } from "lucide-react"
+import { Upload, Zap, Download } from "lucide-react"
 import { URLInput } from "@/components/url-input"
 import { Results } from "@/components/results"
 import { Progress } from "@/components/ui/progress"
@@ -281,49 +281,6 @@ export default function Home() {
           {/* Results Section */}
           {results ? (
             <div className="space-y-6">
-              {/* Summary Cards */}
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <Card className="border-0 shadow-lg bg-red-50 dark:bg-red-950/20">
-                  <CardContent className="pt-4 pb-4">
-                    <div className="text-center">
-                      <AlertCircle className="w-5 h-5 mx-auto mb-1 text-red-600" />
-                      <p className="text-muted-foreground text-xs mb-1">Broken Galleries</p>
-                      <p className="text-2xl font-bold text-red-600">{results.broken_count}</p>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card className="border-0 shadow-lg bg-green-50 dark:bg-green-950/20">
-                  <CardContent className="pt-4 pb-4">
-                    <div className="text-center">
-                      <CheckCircle2 className="w-5 h-5 mx-auto mb-1 text-green-600" />
-                      <p className="text-muted-foreground text-xs mb-1">Working Galleries</p>
-                      <p className="text-2xl font-bold text-green-600">{results.working_count}</p>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card className="border-0 shadow-lg bg-orange-50 dark:bg-orange-950/20">
-                  <CardContent className="pt-4 pb-4">
-                    <div className="text-center">
-                      <AlertCircle className="w-5 h-5 mx-auto mb-1 text-orange-600" />
-                      <p className="text-muted-foreground text-xs mb-1">No Curated Gallery</p>
-                      <p className="text-2xl font-bold text-orange-600">{results.no_gallery_count}</p>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card className="border-0 shadow-lg bg-pink-50 dark:bg-pink-950/20">
-                  <CardContent className="pt-4 pb-4">
-                    <div className="text-center">
-                      <AlertCircle className="w-5 h-5 mx-auto mb-1 text-pink-600" />
-                      <p className="text-muted-foreground text-xs mb-1">Cloudflare Blocked</p>
-                      <p className="text-2xl font-bold text-pink-600">{results.cloudflare_blocked_count}</p>
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
-
               {/* Results Table */}
               <Card className="border-0 shadow-lg">
                 <CardHeader className="flex flex-row items-center justify-between">
