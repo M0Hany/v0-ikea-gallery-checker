@@ -86,13 +86,27 @@ export default function Home() {
     setIsScanning(true)
     setScanError(null)
 
-    setLiveResults((prev) => [...prev, ...urlsToScan.map((url) => ({ url, status: "pending", steps: [] }))])
+    const newResults = [...liveResults, ...urlsToScan.map((url) => ({ url, status: "pending", steps: [] }))]
+    setLiveResults(newResults)
+
+    const controller = new AbortController()
+    const timeoutId = setTimeout(
+      () => {
+        controller.abort()
+        setScanError(
+          "Network timeout: The scan took too long to complete. Please download your progress and try again.",
+        )
+        setIsScanning(false)
+      },
+      5 * 60 * 1000,
+    ) // 5 minute timeout per entire scan
 
     try {
       const response = await fetch("/api/scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ urls: urlsToScan }),
+        signal: controller.signal,
       })
 
       if (!response.ok) {
@@ -104,48 +118,76 @@ export default function Home() {
       const reader = response.body?.getReader()
       const decoder = new TextDecoder()
       let buffer = ""
+      let urlTimeout: NodeJS.Timeout | null = null
+      let lastDataTime = Date.now()
 
-      while (reader) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split("\n")
-        buffer = lines.pop() || ""
-
-        for (const line of lines) {
-          if (line.trim().startsWith("data: ")) {
-            try {
-              const data = JSON.parse(line.slice(6))
-
-              setLiveResults((prev) => {
-                const updated = prev.map((item) =>
-                  item.url === data.url
-                    ? {
-                        ...item,
-                        status: data.status,
-                        steps: data.steps,
-                        result: data.result,
-                        error: data.error,
-                      }
-                    : item,
-                )
-                const completed = updated.filter(
-                  (item) => item.status !== "pending" && item.status !== "processing",
-                ).length
-                const progress = Math.round((completed / liveResults.length) * 100)
-                setScanProgress(progress)
-                return updated
-              })
-            } catch (e) {
-              // Ignore parse errors
-            }
-          }
+      const checkTimeout = () => {
+        if (Date.now() - lastDataTime > 30000) {
+          controller.abort()
+          setScanError(
+            "No response from server for 30 seconds. Network may be interrupted. Download your progress to save partial results.",
+          )
+          setIsScanning(false)
         }
       }
 
+      while (reader) {
+        if (urlTimeout) clearTimeout(urlTimeout)
+        urlTimeout = setTimeout(checkTimeout, 31000)
+
+        try {
+          const { done, value } = await Promise.race([
+            reader.read(),
+            new Promise<{ done: boolean; value?: Uint8Array }>((_, reject) =>
+              setTimeout(() => reject(new Error("Read timeout")), 30000),
+            ),
+          ])
+
+          if (done) break
+
+          lastDataTime = Date.now()
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split("\n")
+          buffer = lines.pop() || ""
+
+          for (const line of lines) {
+            if (line.trim().startsWith("data: ")) {
+              try {
+                const data = JSON.parse(line.slice(6))
+
+                setLiveResults((prev) => {
+                  const updated = prev.map((item) =>
+                    item.url === data.url
+                      ? {
+                          ...item,
+                          status: data.status,
+                          steps: data.steps,
+                          result: data.result,
+                          error: data.error,
+                        }
+                      : item,
+                  )
+                  const progress = calculateProgress(updated)
+                  setScanProgress(progress)
+                  return updated
+                })
+              } catch (e) {
+                // Ignore parse errors
+              }
+            }
+          }
+        } catch (error) {
+          if (error instanceof Error && error.message === "Read timeout") {
+            setScanError("Network timeout while reading response. Download your progress to save partial results.")
+          }
+          break
+        }
+      }
+
+      if (urlTimeout) clearTimeout(urlTimeout)
+
       const allItems: any[] = []
-      for (const item of liveResults) {
+      for (const item of newResults) {
         if (item.result?.items) {
           allItems.push(...item.result.items)
         }
@@ -171,7 +213,7 @@ export default function Home() {
       const cloudflareBlockedCount = uniqueItems.filter((item) => item.cloudflare_blocked).length
 
       setResults({
-        total_pages: liveResults.length,
+        total_pages: newResults.length,
         broken_count: brokenCount,
         working_count: workingCount,
         no_gallery_count: noCuratedGalleryCount,
@@ -180,10 +222,16 @@ export default function Home() {
       })
       setScanProgress(100)
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Network error occurred. Partial results are saved."
-      setScanError(errorMessage)
-      console.error("Scan error:", error)
+      if (error instanceof Error && error.name === "AbortError") {
+        // Error already set above
+      } else {
+        const errorMessage =
+          error instanceof Error ? error.message : "Network error occurred. Partial results are saved."
+        setScanError(errorMessage)
+      }
+      console.error("[v0] Scan error:", error)
     } finally {
+      clearTimeout(timeoutId)
       setIsScanning(false)
     }
   }
