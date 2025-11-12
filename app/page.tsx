@@ -76,20 +76,30 @@ export default function Home() {
   }
 
   const startScan = async (urls: string[]) => {
+    const urlsToScan = urls.filter((url) => !liveResults.find((item) => item.url === url && item.status !== "pending"))
+
+    if (urlsToScan.length === 0) {
+      setScanError("All URLs have already been scanned")
+      return
+    }
+
     setIsScanning(true)
-    setScanProgress(0)
-    setResults(null)
     setScanError(null)
-    setLiveResults(urls.map((url) => ({ url, status: "pending", steps: [] }))) // initialize live results
+
+    setLiveResults((prev) => [...prev, ...urlsToScan.map((url) => ({ url, status: "pending", steps: [] }))])
 
     try {
       const response = await fetch("/api/scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ urls }),
+        body: JSON.stringify({ urls: urlsToScan }),
       })
 
-      if (!response.ok) throw new Error(`Server error: ${response.statusText}`)
+      if (!response.ok) {
+        setScanError(`Server error: ${response.statusText}`)
+        setIsScanning(false)
+        return
+      }
 
       const reader = response.body?.getReader()
       const decoder = new TextDecoder()
@@ -123,7 +133,7 @@ export default function Home() {
                 const completed = updated.filter(
                   (item) => item.status !== "pending" && item.status !== "processing",
                 ).length
-                const progress = Math.round((completed / urls.length) * 100)
+                const progress = Math.round((completed / liveResults.length) * 100)
                 setScanProgress(progress)
                 return updated
               })
@@ -161,7 +171,7 @@ export default function Home() {
       const cloudflareBlockedCount = uniqueItems.filter((item) => item.cloudflare_blocked).length
 
       setResults({
-        total_pages: urls.length,
+        total_pages: liveResults.length,
         broken_count: brokenCount,
         working_count: workingCount,
         no_gallery_count: noCuratedGalleryCount,
@@ -170,7 +180,7 @@ export default function Home() {
       })
       setScanProgress(100)
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Failed to complete scan. Please try again."
+      const errorMessage = error instanceof Error ? error.message : "Network error occurred. Partial results are saved."
       setScanError(errorMessage)
       console.error("Scan error:", error)
     } finally {
@@ -210,6 +220,24 @@ export default function Home() {
     window.URL.revokeObjectURL(url)
   }
 
+  const handleScanAgain = () => {
+    setResults(null)
+    setScanProgress(0)
+    setScanError(null)
+    setLiveResults([])
+  }
+
+  const getPendingURLs = () => {
+    return liveResults.filter((item) => item.status === "pending").map((item) => item.url)
+  }
+
+  const handleResumeScan = async () => {
+    const pendingURLs = getPendingURLs()
+    if (pendingURLs.length > 0) {
+      await startScan(pendingURLs)
+    }
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-slate-50 dark:to-slate-950">
       <div className="container mx-auto py-12 px-4">
@@ -228,7 +256,7 @@ export default function Home() {
 
         <div className="grid gap-8">
           {/* Input Section */}
-          {!isScanning && !results ? (
+          {!isScanning && !results && liveResults.length === 0 ? (
             <Card className="border-0 shadow-lg">
               <CardHeader>
                 <CardTitle>Upload IKEA URLs</CardTitle>
@@ -271,11 +299,13 @@ export default function Home() {
           ) : null}
 
           {/* Scanning State */}
-          {isScanning ? (
+          {isScanning || liveResults.length > 0 ? (
             <Card className="border-0 shadow-lg">
               <CardHeader>
-                <CardTitle>Scanning in Progress</CardTitle>
-                <CardDescription>Processing URLs sequentially...</CardDescription>
+                <CardTitle>{isScanning ? "Scanning in Progress" : "Scan Results"}</CardTitle>
+                <CardDescription>
+                  {isScanning ? "Processing URLs sequentially..." : `${liveResults.length} total URLs processed`}
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 {scanError && (
@@ -292,45 +322,26 @@ export default function Home() {
                   <Progress value={scanProgress} className="h-2" />
                 </div>
 
-                <Results items={liveResults} isLive={true} />
+                <Results items={liveResults} isLive={isScanning} />
               </CardContent>
             </Card>
           ) : null}
 
-          {/* Results Section */}
-          {results ? (
-            <div className="space-y-6">
-              {/* Results Table */}
-              <Card className="border-0 shadow-lg">
-                <CardHeader className="flex flex-row items-center justify-between">
-                  <div>
-                    <CardTitle>Scan Results</CardTitle>
-                    <CardDescription>{results.total_pages} total pages scanned</CardDescription>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <Results items={liveResults} isLive={false} />
-                </CardContent>
-              </Card>
-
-              {/* Action Buttons */}
-              <div className="flex gap-3 justify-center">
-                <Button
-                  onClick={() => {
-                    setResults(null)
-                    setScanProgress(0)
-                    setScanError(null)
-                  }}
-                  variant="outline"
-                  size="lg"
-                >
-                  Scan Again
+          {/* Action Buttons */}
+          {liveResults.length > 0 ? (
+            <div className="flex gap-3 justify-center flex-wrap">
+              {!isScanning && getPendingURLs().length > 0 && (
+                <Button onClick={handleResumeScan} variant="default" size="lg">
+                  Resume Scan ({getPendingURLs().length} remaining)
                 </Button>
-                <Button onClick={exportToCSV} variant="outline" size="lg" className="gap-2 bg-transparent">
-                  <Download className="w-4 h-4" />
-                  Export CSV
-                </Button>
-              </div>
+              )}
+              <Button onClick={handleScanAgain} variant="outline" size="lg">
+                Scan Again
+              </Button>
+              <Button onClick={exportToCSV} variant="outline" size="lg" className="gap-2 bg-transparent">
+                <Download className="w-4 h-4" />
+                Export CSV
+              </Button>
             </div>
           ) : null}
         </div>
