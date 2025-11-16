@@ -6,7 +6,7 @@ import { useState, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Upload, Zap, Download } from "lucide-react"
+import { Upload, Zap, Download } from 'lucide-react'
 import { URLInput } from "@/components/url-input"
 import { Results } from "@/components/results"
 import { Progress } from "@/components/ui/progress"
@@ -76,7 +76,8 @@ export default function Home() {
   }
 
   const startScan = async (urls: string[]) => {
-    const urlsToScan = urls.filter((url) => !liveResults.find((item) => item.url === url && item.status !== "pending"))
+    const existingUrls = new Set(liveResults.map((item) => item.url))
+    const urlsToScan = urls.filter((url) => !existingUrls.has(url))
 
     if (urlsToScan.length === 0) {
       setScanError("All URLs have already been scanned")
@@ -86,7 +87,7 @@ export default function Home() {
     setIsScanning(true)
     setScanError(null)
 
-    const newResults = [...liveResults, ...urlsToScan.map((url) => ({ url, status: "pending", steps: [] }))]
+    const newResults = [...liveResults, ...urlsToScan.map((url) => ({ url, status: "pending" as const, steps: [] }))]
     setLiveResults(newResults)
 
     const controller = new AbortController()
@@ -94,12 +95,12 @@ export default function Home() {
       () => {
         controller.abort()
         setScanError(
-          "Network timeout: The scan took too long to complete. Please download your progress and try again.",
+          "Network timeout: The entire scan took too long to complete. Please download your progress and try again.",
         )
         setIsScanning(false)
       },
-      5 * 60 * 1000,
-    ) // 5 minute timeout per entire scan
+      10 * 60 * 1000,
+    ) // 10 minute timeout for entire scan
 
     try {
       const response = await fetch("/api/scan", {
@@ -118,30 +119,22 @@ export default function Home() {
       const reader = response.body?.getReader()
       const decoder = new TextDecoder()
       let buffer = ""
-      let urlTimeout: NodeJS.Timeout | null = null
       let lastDataTime = Date.now()
 
-      const checkTimeout = () => {
-        if (Date.now() - lastDataTime > 30000) {
+      const inactivityTimeoutId = setInterval(() => {
+        if (Date.now() - lastDataTime > 60000) {
           controller.abort()
           setScanError(
-            "No response from server for 30 seconds. Network may be interrupted. Download your progress to save partial results.",
+            "No data received for 60 seconds. Network may be interrupted. Download your progress to save partial results.",
           )
           setIsScanning(false)
+          clearInterval(inactivityTimeoutId)
         }
-      }
+      }, 5000) // Check every 5 seconds
 
       while (reader) {
-        if (urlTimeout) clearTimeout(urlTimeout)
-        urlTimeout = setTimeout(checkTimeout, 31000)
-
         try {
-          const { done, value } = await Promise.race([
-            reader.read(),
-            new Promise<{ done: boolean; value?: Uint8Array }>((_, reject) =>
-              setTimeout(() => reject(new Error("Read timeout")), 30000),
-            ),
-          ])
+          const { done, value } = await reader.read()
 
           if (done) break
 
@@ -177,14 +170,14 @@ export default function Home() {
             }
           }
         } catch (error) {
-          if (error instanceof Error && error.message === "Read timeout") {
-            setScanError("Network timeout while reading response. Download your progress to save partial results.")
+          if (error instanceof Error && error.name !== "AbortError") {
+            setScanError("Connection interrupted while reading response. Download your progress to save partial results.")
           }
           break
         }
       }
 
-      if (urlTimeout) clearTimeout(urlTimeout)
+      clearInterval(inactivityTimeoutId)
 
       const allItems: any[] = []
       for (const item of newResults) {
@@ -229,7 +222,6 @@ export default function Home() {
           error instanceof Error ? error.message : "Network error occurred. Partial results are saved."
         setScanError(errorMessage)
       }
-      console.error("[v0] Scan error:", error)
     } finally {
       clearTimeout(timeoutId)
       setIsScanning(false)
