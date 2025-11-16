@@ -2,7 +2,7 @@
 
 import React from "react"
 import { useState } from "react"
-import { AlertCircle, AlertTriangle, CheckCircle2, ChevronDown } from "lucide-react" // Declare these variables before using them
+import { AlertCircle, AlertTriangle, CheckCircle2, ChevronDown } from 'lucide-react' // Declare these variables before using them
 
 type ResultsProps = {
   items: {
@@ -12,6 +12,7 @@ type ResultsProps = {
     result?: {
       scraped_html?: string
     }
+    elapsedTime?: number
   }[]
   isLive?: boolean
 }
@@ -62,7 +63,7 @@ export function Results({ items, isLive = false }: ResultsProps) {
     }
   }
 
-  const getStatusText = (status: string) => {
+  const getStatusText = (status: string, elapsedTime?: number) => {
     if (status === "broken") {
       return <span className="text-xs font-semibold text-red-600 dark:text-red-400">BROKEN</span>
     } else if (status === "no curated gallery") {
@@ -85,6 +86,12 @@ export function Results({ items, isLive = false }: ResultsProps) {
     return Math.min(Math.round((steps.length / TOTAL_STEPS) * 100), 99)
   }
 
+  const formatElapsedTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60)
+    const secs = seconds % 60
+    return `${mins}m ${secs}s`
+  }
+
   return (
     <div className="space-y-2">
       <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-lg">
@@ -94,6 +101,7 @@ export function Results({ items, isLive = false }: ResultsProps) {
               <th className="px-4 py-3 text-left font-semibold text-foreground w-8"></th>
               <th className="px-4 py-3 text-left font-semibold text-foreground">URL</th>
               <th className="px-4 py-3 text-left font-semibold text-foreground">Status</th>
+              <th className="px-4 py-3 text-left font-semibold text-foreground">Time</th>
             </tr>
           </thead>
           <tbody>
@@ -126,20 +134,20 @@ export function Results({ items, isLive = false }: ResultsProps) {
                       <div className="flex items-center gap-2 w-fit">
                         {getStatusIcon(item.status, isProcessing)}
                         <div className="flex flex-col">
-                          {getStatusText(item.status)}
+                          {getStatusText(item.status, item.elapsedTime)}
                           {isProcessing && progressPercent > 0 && (
                             <span className="text-xs text-muted-foreground">{progressPercent}%</span>
                           )}
                         </div>
                       </div>
                     </td>
+                    <td className="px-4 py-3 text-xs text-muted-foreground">
+                      {item.elapsedTime !== undefined ? formatElapsedTime(item.elapsedTime) : "-"}
+                    </td>
                   </tr>
                   {expandedUrls.has(item.url) && (
-                    <tr
-                      key={`${idx}-expanded`}
-                      className="border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50"
-                    >
-                      <td colSpan={3} className="px-4 py-4">
+                    <tr key={`${idx}-expanded`} className="border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50">
+                      <td colSpan={4} className="px-4 py-4">
                         <div className="space-y-3">
                           <div>
                             <p className="text-xs font-semibold text-muted-foreground uppercase mb-2">Current Step</p>

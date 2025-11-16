@@ -33,6 +33,8 @@ interface URLScanStatus {
   steps: string[]
   result?: any
   error?: string
+  startTime?: number // Add tracking for elapsed time
+  elapsedTime?: number // Store elapsed time in seconds
 }
 
 const calculateProgress = (liveResults: URLScanStatus[]): number => {
@@ -48,6 +50,8 @@ export default function Home() {
   const [liveResults, setLiveResults] = useState<URLScanStatus[]>([])
   const [scanError, setScanError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const abortControllerRef = useRef<AbortController | null>(null) // Store abort controller for halt
+  const timerIntervalRef = useRef<NodeJS.Timeout | null>(null) // Store timer interval
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
@@ -87,20 +91,11 @@ export default function Home() {
     setIsScanning(true)
     setScanError(null)
 
-    const newResults = [...liveResults, ...urlsToScan.map((url) => ({ url, status: "pending" as const, steps: [] }))]
+    const newResults = [...liveResults, ...urlsToScan.map((url) => ({ url, status: "pending" as const, steps: [], startTime: 0 }))]
     setLiveResults(newResults)
 
     const controller = new AbortController()
-    const timeoutId = setTimeout(
-      () => {
-        controller.abort()
-        setScanError(
-          "Network timeout: The entire scan took too long to complete. Please download your progress and try again.",
-        )
-        setIsScanning(false)
-      },
-      10 * 60 * 1000,
-    ) // 10 minute timeout for entire scan
+    abortControllerRef.current = controller // Store controller for halt button
 
     try {
       const response = await fetch("/api/scan", {
@@ -119,18 +114,17 @@ export default function Home() {
       const reader = response.body?.getReader()
       const decoder = new TextDecoder()
       let buffer = ""
-      let lastDataTime = Date.now()
 
-      const inactivityTimeoutId = setInterval(() => {
-        if (Date.now() - lastDataTime > 60000) {
-          controller.abort()
-          setScanError(
-            "No data received for 60 seconds. Network may be interrupted. Download your progress to save partial results.",
-          )
-          setIsScanning(false)
-          clearInterval(inactivityTimeoutId)
-        }
-      }, 5000) // Check every 5 seconds
+      timerIntervalRef.current = setInterval(() => {
+        setLiveResults((prev) =>
+          prev.map((item) => {
+            if (item.status === "processing" && item.startTime) {
+              return { ...item, elapsedTime: Math.floor((Date.now() - item.startTime) / 1000) }
+            }
+            return item
+          })
+        )
+      }, 1000)
 
       while (reader) {
         try {
@@ -138,7 +132,6 @@ export default function Home() {
 
           if (done) break
 
-          lastDataTime = Date.now()
           buffer += decoder.decode(value, { stream: true })
           const lines = buffer.split("\n")
           buffer = lines.pop() || ""
@@ -149,17 +142,26 @@ export default function Home() {
                 const data = JSON.parse(line.slice(6))
 
                 setLiveResults((prev) => {
-                  const updated = prev.map((item) =>
-                    item.url === data.url
-                      ? {
-                          ...item,
-                          status: data.status,
-                          steps: data.steps,
-                          result: data.result,
-                          error: data.error,
-                        }
-                      : item,
-                  )
+                  const updated = prev.map((item) => {
+                    if (item.url === data.url) {
+                      const startTime = item.startTime || (data.status === "processing" ? Date.now() : 0)
+                      const elapsedTime =
+                        data.status !== "processing" && startTime
+                          ? Math.floor((Date.now() - startTime) / 1000)
+                          : item.elapsedTime || 0
+
+                      return {
+                        ...item,
+                        status: data.status,
+                        steps: data.steps,
+                        result: data.result,
+                        error: data.error,
+                        startTime,
+                        elapsedTime,
+                      }
+                    }
+                    return item
+                  })
                   const progress = calculateProgress(updated)
                   setScanProgress(progress)
                   return updated
@@ -171,13 +173,15 @@ export default function Home() {
           }
         } catch (error) {
           if (error instanceof Error && error.name !== "AbortError") {
-            setScanError("Connection interrupted while reading response. Download your progress to save partial results.")
+            setScanError("Connection interrupted. Your progress has been saved. Download and try remaining URLs.")
           }
           break
         }
       }
 
-      clearInterval(inactivityTimeoutId)
+      if (timerIntervalRef.current) {
+        clearInterval(timerIntervalRef.current)
+      }
 
       const allItems: any[] = []
       for (const item of newResults) {
@@ -216,14 +220,17 @@ export default function Home() {
       setScanProgress(100)
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") {
-        // Error already set above
+        setScanError("Scan halted by user. Download your progress and continue with remaining URLs.")
       } else {
         const errorMessage =
           error instanceof Error ? error.message : "Network error occurred. Partial results are saved."
         setScanError(errorMessage)
       }
     } finally {
-      clearTimeout(timeoutId)
+      if (timerIntervalRef.current) {
+        clearInterval(timerIntervalRef.current)
+      }
+      abortControllerRef.current = null
       setIsScanning(false)
     }
   }
@@ -275,6 +282,13 @@ export default function Home() {
     const pendingURLs = getPendingURLs()
     if (pendingURLs.length > 0) {
       await startScan(pendingURLs)
+    }
+  }
+
+  const handleHaltProcessing = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+      setScanError("Scan halted by user. Download your progress and continue with remaining URLs.")
     }
   }
 
@@ -370,6 +384,11 @@ export default function Home() {
           {/* Action Buttons */}
           {liveResults.length > 0 ? (
             <div className="flex gap-3 justify-center flex-wrap">
+              {isScanning && (
+                <Button onClick={handleHaltProcessing} variant="destructive" size="lg">
+                  Halt Processing
+                </Button>
+              )}
               {!isScanning && getPendingURLs().length > 0 && (
                 <Button onClick={handleResumeScan} variant="default" size="lg">
                   Resume Scan ({getPendingURLs().length} remaining)
