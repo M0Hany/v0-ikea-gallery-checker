@@ -159,6 +159,10 @@ async function detectBrokenGalleriesWithSteps(url: string, onStep: (step: string
       const containerDiv = containerMatch[0]
       const containerContent = containerMatch[1]
 
+      if (/<video[^>]*>/i.test(containerContent)) {
+        continue
+      }
+
       const hasWorkingGallery = /pub__shoppable-image[^"]*--visible-dots/.test(containerContent)
 
       if (hasWorkingGallery) {
